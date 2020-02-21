@@ -11,11 +11,10 @@
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
 #include "Eigen/Dense"
-#include "pointcloud_helpers.h"
+#include "SDFTable.h"
 
 using std::string;
 using std::vector;
-using sensor_msgs::PointCloud2;
 using namespace Eigen;
 
 DEFINE_string(
