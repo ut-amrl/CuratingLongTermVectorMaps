@@ -93,6 +93,7 @@ class SDFTable {
       return distances_;
     }
     
+    void updateWeightAndDistance(Vector2f point, double signed_distance);
     void populateFromScan(sensor_msgs::LaserScan &laser_scan, bool truncate_ends);
     void populateFromScan(sensor_msgs::LaserScan &laser_scan, bool truncate_ends, Eigen::Vector2f location, Eigen::Rotation2Df orientation);
     void normalizeWeights();
