@@ -21,11 +21,7 @@ using cimg_library::CImg;
 class SDFTable {
   uint64_t width_;
   uint64_t height_;
-  double max_range_;
   double resolution_;
-  double delta_;
-  double epsilon_;
-  double sigma_;
   CImg<double> distances_;
   CImg<double> weights_;
 
@@ -60,22 +56,22 @@ class SDFTable {
     }
 
   public:
-    SDFTable(const double range,
-                const double resolution, const double delta = 0.2, const double epsilon = 0.2, const double sigma = 0.5) :
-                width_(floor((range * 2.0) / resolution)),
-                height_(floor((range * 2.0) / resolution)),
-                max_range_(range),
-                resolution_(resolution),
-                delta_(delta),
-                epsilon_(epsilon),
-                sigma_(sigma) {
+    SDFTable(const uint64_t width, // width in pixels
+                const uint64_t height, // height in pixels
+                const double resolution) :
+                width_(width),
+                height_(height),
+                resolution_(resolution) {
       // Construct a width x height image, with only 1 z level.
       // And, only one double per color with default value 0.0.
       distances_ = CImg<double>(width_, height_, 1, 1, 0.0);
       weights_ = CImg<double>(width_, height_, 1, 1, 0.0);
     }
 
-    SDFTable() : width_(0), height_(0), max_range_(0), resolution_(1) {}
+    SDFTable(const double range, const double resolution) :
+      SDFTable(floor((range * 2.0) / resolution), floor((range * 2.0) / resolution), resolution) {};
+
+    SDFTable() : width_(0), height_(0), resolution_(1) {}
 
     inline double getPointDistance(Vector2f point) const {
       uint64_t x = convertX(point.x());
@@ -98,6 +94,7 @@ class SDFTable {
     }
     
     void populateFromScan(sensor_msgs::LaserScan &laser_scan, bool truncate_ends);
+    void populateFromScan(sensor_msgs::LaserScan &laser_scan, bool truncate_ends, Eigen::Vector2f location, Eigen::Rotation2Df orientation);
     void normalizeWeights();
 };
 

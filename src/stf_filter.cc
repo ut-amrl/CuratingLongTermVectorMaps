@@ -13,6 +13,8 @@
 #include "Eigen/Dense"
 #include "SDFTable.h"
 #include "CImg.h"
+#include <geometry_msgs/Pose.h>
+#include "cobot_msgs/CobotLocalizationMsg.h"
 
 using std::string;
 using std::vector;
@@ -21,11 +23,15 @@ using namespace Eigen;
 DEFINE_string(
   bag_file,
   "",
-  "Bag file from which to read scans. Only works if scan_match_topic isn't provided.");
+  "Bag file from which to read scans.");
 DEFINE_string(
   lidar_topic,
   "/Cobot/Laser",
-  "topic within bag file which to read scans. Only works if scan_match_topic isn't provided.");
+  "topic within bag file which to read scans.");
+DEFINE_string(
+  loc_topic,
+  "/Cobot/Localization",
+  "topic within bag file which to read locations.");
 DEFINE_double(
   laser_range,
   30,
@@ -38,7 +44,7 @@ void SignalHandler(int signum) {
 }
 
 // Given 2 scans calculate relative transformation & uncertainty
-void filter_short_term_features(string bag_path, string lidar_topic) {
+void filter_short_term_features(string bag_path, string lidar_topic, string loc_topic) {
   printf("Loading bag file... ");
   std::vector<Vector2f> baseCloud;
   std::vector<Vector2f> matchCloud;
@@ -53,23 +59,42 @@ void filter_short_term_features(string bag_path, string lidar_topic) {
   // Get the topics we want
   vector<string> topics;
   topics.emplace_back(lidar_topic.c_str());
+  topics.emplace_back(loc_topic.c_str());
   rosbag::View view(bag, rosbag::TopicQuery(topics));
   printf("Bag file has %d scans\n", view.size());
 
   SDFTable table = SDFTable(10, 0.2);
+  SDFTable global = SDFTable(400, 400, 0.5);
+
+  Vector2f lastLoc(0, 0);
+  Eigen::Rotation2Df lastOrientation(0);
+
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        it != view.end();
        ++it) {
     const rosbag::MessageInstance &message = *it;
     {
-      // Load all the point clouds into memory.
       sensor_msgs::LaserScanPtr laser_scan =
               message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
         // Process the laser scan
         table.populateFromScan(*laser_scan, true);
+        global.populateFromScan(*laser_scan, true, lastLoc, lastOrientation);
+        // break;
+      }
+
+      geometry_msgs::PosePtr pose =
+              message.instantiate<geometry_msgs::Pose>();
+      if (pose != nullptr) {
+        // TODO general poses
         break;
+      }
+
+      cobot_msgs::CobotLocalizationMsgPtr loc = message.instantiate<cobot_msgs::CobotLocalizationMsg>();
+      if (loc != nullptr) {
+        lastLoc = Vector2f(loc->x, loc->y);
+        lastOrientation = Eigen::Rotation2Df(loc->angle).toRotationMatrix();
       }
     }
   }
@@ -90,8 +115,8 @@ int main(int argc, char** argv) {
   google::ParseCommandLineFlags(&argc, &argv, false);
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
-  if (FLAGS_bag_file.compare("") != 0 && FLAGS_lidar_topic.compare("") != 0) {
-    filter_short_term_features(FLAGS_bag_file, FLAGS_lidar_topic);
+  if (FLAGS_bag_file.compare("") != 0) {
+    filter_short_term_features(FLAGS_bag_file, FLAGS_lidar_topic, FLAGS_loc_topic);
   } else {
     std::cout << "Must specify bag file, lidar topic" << std::endl;
     exit(0);
