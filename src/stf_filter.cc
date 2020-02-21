@@ -64,11 +64,10 @@ void filter_short_term_features(string bag_path, string lidar_topic, string loc_
   printf("Bag file has %d scans\n", view.size());
 
   SDFTable table = SDFTable(10, 0.2);
-  SDFTable global = SDFTable(400, 400, 0.5);
+  SDFTable global = SDFTable(400, 400, 0.25);
 
   Vector2f lastLoc(0, 0);
   Eigen::Rotation2Df lastOrientation(0);
-
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        it != view.end();
@@ -79,7 +78,7 @@ void filter_short_term_features(string bag_path, string lidar_topic, string loc_
               message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
         // Process the laser scan
-        table.populateFromScan(*laser_scan, true);
+        // table.populateFromScan(*laser_scan, true);
         global.populateFromScan(*laser_scan, true, lastLoc, lastOrientation);
         // break;
       }
@@ -101,10 +100,11 @@ void filter_short_term_features(string bag_path, string lidar_topic, string loc_
   bag.close();
   printf("Done.\n");
   fflush(stdout);
-
+ 
+  // -39, -21 -> 1.8, 21.8
 
   cimg_library::CImgDisplay display1;
-  display1.display(table.GetWeightDebugImage().normalize());
+  display1.display(global.GetDistanceDebugImage().resize_doubleXY().normalize());
   while (!display1.is_closed()) {
     display1.wait();
   }

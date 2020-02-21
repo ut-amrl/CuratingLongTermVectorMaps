@@ -76,12 +76,18 @@ class SDFTable {
     inline double getPointDistance(Vector2f point) const {
       uint64_t x = convertX(point.x());
       uint64_t y = convertY(point.y());
+      if (x >= width_ || y >= height_) {
+        printf("BIG BAD (%f, %f) %lu %lu\n", point.x(), point.y(), x, y);
+      }
       return distances_(x, y);
     }
 
     inline double getPointWeight(Vector2f point) const {
       uint64_t x = convertX(point.x());
       uint64_t y = convertY(point.y());
+      if (x >= width_ || y >= height_) {
+        printf("BIG BAD (%f, %f) %lu %lu\n", point.x(), point.y(), x, y);
+      }
       return weights_(x, y);
     }
 
