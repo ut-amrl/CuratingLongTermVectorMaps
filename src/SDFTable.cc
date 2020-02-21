@@ -7,6 +7,7 @@ void SDFTable::populateFromScan(sensor_msgs::LaserScan& laser_scan, bool truncat
   vector<pair<size_t, Vector2f>> pointcloud;
   float angle_offset = laser_scan.angle_min;
   float angle_truncation = truncate_ends ? M_PI / 12.0 : 0;
+
   for (size_t index = 0; index < laser_scan.ranges.size(); index++) {
     float range = laser_scan.ranges[index];
     if (range >= laser_scan.range_min && range <= max_range_ && angle_offset > laser_scan.angle_min + angle_truncation && angle_offset < laser_scan.angle_max - angle_truncation) {
@@ -30,7 +31,6 @@ void SDFTable::populateFromScan(sensor_msgs::LaserScan& laser_scan, bool truncat
 
         double new_d = (saved_weight * saved_distance) + (curr_w * curr_d) / (saved_weight + curr_w);
         double new_w = (curr_w + saved_weight);
-
         setPointDistance(point, new_d);
         setPointWeight(point, new_w);
       }
@@ -44,7 +44,7 @@ void SDFTable::normalizeWeights() {
   double w_max = weights_.max();
 
   for(uint64_t x = 0; x < width_; x++) {
-    for(uint64_t y = 0; y < width_; y++) {
+    for(uint64_t y = 0; y < height_; y++) {
       double w = getPointWeight(x, y);
       double target = (w / w_max) < Constants::T1 ? 0.0 : 1.0;
       setPointWeight(x, y, target);

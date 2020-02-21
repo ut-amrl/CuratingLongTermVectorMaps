@@ -12,6 +12,7 @@
 #include "rosbag/view.h"
 #include "Eigen/Dense"
 #include "SDFTable.h"
+#include "CImg.h"
 
 using std::string;
 using std::vector;
@@ -54,6 +55,8 @@ void filter_short_term_features(string bag_path, string lidar_topic) {
   topics.emplace_back(lidar_topic.c_str());
   rosbag::View view(bag, rosbag::TopicQuery(topics));
   printf("Bag file has %d scans\n", view.size());
+
+  SDFTable table = SDFTable(10, 0.2);
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        it != view.end();
@@ -64,8 +67,9 @@ void filter_short_term_features(string bag_path, string lidar_topic) {
       sensor_msgs::LaserScanPtr laser_scan =
               message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
-        
         // Process the laser scan
+        table.populateFromScan(*laser_scan, true);
+        break;
       }
     }
   }
@@ -73,6 +77,12 @@ void filter_short_term_features(string bag_path, string lidar_topic) {
   printf("Done.\n");
   fflush(stdout);
 
+
+  cimg_library::CImgDisplay display1;
+  display1.display(table.GetWeightDebugImage().normalize());
+  while (!display1.is_closed()) {
+    display1.wait();
+  }
 }
 
 int main(int argc, char** argv) {
