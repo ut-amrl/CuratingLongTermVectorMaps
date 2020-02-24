@@ -35,10 +35,7 @@ void SDFTable::populateFromScan(sensor_msgs::LaserScan& laser_scan, bool truncat
         Vector2f point(sub_range, 0.0);
         point = rot_matrix * point;
 
-        // printf("Relative Point: (%f, %f) - ", point.x(), point.y());
-        // printf("Pose: (%f, %f, %f) - ", location.x(), location.y(), orientation.angle());
         Vector2f global_point = orientation * (point) + location;
-        // printf("Global Point: (%f, %f)\n", global_point.x(), global_point.y());
 
         double signed_dist = -(sub_range - range);
         updateWeightAndDistance(global_point, signed_dist);
@@ -63,4 +60,9 @@ void SDFTable::normalizeWeights() {
       setPointWeight(x, y, target);
     }
   }
+}
+
+void SDFTable::updateWithSDF(SDFTable& shortTermSDF) {
+  // TODO: Figure out how to do weighted average?
+  weights_ = shortTermSDF.GetWeightDebugImage();
 }

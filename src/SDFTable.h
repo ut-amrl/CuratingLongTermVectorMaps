@@ -98,11 +98,17 @@ class SDFTable {
     CImg<double> GetDistanceDebugImage() const {
       return distances_;
     }
+
+    inline void clear() {
+      weights_.clear();
+      distances_.clear();
+    }
     
     void updateWeightAndDistance(Vector2f point, double signed_distance);
     void populateFromScan(sensor_msgs::LaserScan &laser_scan, bool truncate_ends);
     void populateFromScan(sensor_msgs::LaserScan &laser_scan, bool truncate_ends, Eigen::Vector2f location, Eigen::Rotation2Df orientation);
     void normalizeWeights();
+    void updateWithSDF(SDFTable &shortTermSDF);
 };
 
 #endif  // SRC_SDFTABLE_H
