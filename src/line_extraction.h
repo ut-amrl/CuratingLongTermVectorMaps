@@ -47,7 +47,7 @@ struct LineSegment {
     }
 };
 
-vector<LineSegment> ExtractLines(vector<Vector2f> pointcloud);
+vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud);
 
 }
 

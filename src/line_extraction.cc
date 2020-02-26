@@ -5,6 +5,7 @@
 #include <time.h>
 #include <vector>
 #include <thread>
+#include <mutex>
 
 #include "Eigen/Dense"
 #include "ceres/ceres.h"
@@ -66,16 +67,26 @@ LineSegment RANSACLineSegment(const vector<Vector2f> pointcloud) {
 
 vector<Vector2f> GetNeighborhood(const vector<Vector2f> points) {
   // Pick a random point to center this around.
+  vector<Vector2f> remaining_points = points;
   srand(time(NULL));
-  size_t rand_idx = rand() % points.size();
-  Vector2f center_point = points[rand_idx];
-  // Now get the points around it
   vector<Vector2f> neighborhood;
-  for (Vector2f point : points) {
-    if ((center_point - point).norm() <= NEIGHBORHOOD_SIZE) {
-      neighborhood.push_back(point);
+  do {
+    neighborhood.clear();
+    if (remaining_points.size() <= 0) {
+      return vector<Vector2f>();
     }
-  }
+    size_t rand_idx = rand() % remaining_points.size();
+    Vector2f center_point = remaining_points[rand_idx];
+    // Now get the points around it
+    for (Vector2f point : remaining_points) {
+      if ((center_point - point).norm() <= NEIGHBORHOOD_SIZE) {
+        neighborhood.push_back(point);
+      }
+    }
+    if (neighborhood.size() <= 1) {
+      remaining_points.erase(remaining_points.begin() + rand_idx);
+    }
+  } while(neighborhood.size() <= 1);
   CHECK_GT(neighborhood.size(), 1);
   return neighborhood;
 }
@@ -88,54 +99,82 @@ Vector2f GetCenterOfMass(const vector<Vector2f>& pointcloud) {
   return sum / pointcloud.size();
 }
 
+std::mutex lock;
+
 struct FitLineResidual {
     template<typename T>
     bool operator() (const T* first_point,
                      const T* second_point,
                      T* residuals) const {
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      Vector2T center = center_of_points.cast<T>();
-      Vector2T line_seg_start = line_seg.start_point.cast<T>();
-      Vector2T line_seg_end = line_seg.end_point.cast<T>();
-      T r = ((center - line_seg_start).norm() +
-            (center - line_seg_end).norm()) /
-            T(points.size());
+      // Cast everything over to generic
       const Vector2T first_pointT(first_point[0], first_point[1]);
       const Vector2T second_pointT(second_point[0], second_point[1]);
-      for (size_t i = 0; i < points.size(); i++) {
-        Vector2T pointT = points[i].cast<T>();
-        T t = (pointT - first_pointT).dot(second_pointT - first_pointT) /
-              (second_pointT - first_pointT).norm();
-        T R = r;
-        if (t < T(0)) {
-          R += (pointT - line_seg_start).norm();
-        } else if (t > T(1)) {
-          R += (pointT - line_seg_end).norm();
-        } else {
-          R += (first_pointT + t * (second_pointT - first_pointT) - pointT).norm();
-        }
-        residuals[i] = R;
+      const Vector2T pointT = point.cast<T>();
+      //Vector2T center = center_of_mass.cast<T>();
+      Vector2T line_seg_start = line_seg.start_point.cast<T>();
+      Vector2T line_seg_end = line_seg.end_point.cast<T>();
+      // Find the centroid (missing denominator which is used later).
+      T r = T((center_of_mass - line_seg.start_point).norm() +
+            (center_of_mass - line_seg.end_point).norm());
+      T t;
+      if (abs((second_pointT - first_pointT).norm()) < 0.0001) {
+        // If the two points are basically the same point, then t should be 0 so later R will be the distance
+        // from the first_point to the pointT.
+        t = T(0);
+      } else {
+        t = (pointT - first_pointT).dot(second_pointT - first_pointT) /
+            (second_pointT - first_pointT).norm();
       }
+      T dist;
+      if (t < T(0)) {
+        dist = (pointT - line_seg_start).norm();
+      } else if (t > T(1)) {
+        dist = (pointT - line_seg_end).norm();
+      } else {
+        //dist = (pointT - first_pointT + t * (second_pointT - first_pointT)).norm();
+        Eigen::Hyperplane<T, 2> line = Eigen::Hyperplane<T, 2>::Through(first_pointT, second_pointT);
+        dist = line.absDistance(pointT);
+      }
+      if (!ceres::isfinite((r / T(point_num)) + dist)) {
+        lock.lock();
+        std::cout << "R: " << r << std::endl;
+        std::cout << "P: " << point << std::endl;
+        std::cout << "FP: " << first_point[0] << " " << first_point[1] << std::endl;
+        std::cout << "SP: " << second_point[0] << " " << second_point[1] << std::endl;
+        std::cout << "Dist: " << dist << std::endl;
+        std::cout << "T: " << t << std::endl;
+        std::cout << "StP: " << line_seg.start_point << std::endl;
+        std::cout << "EnP: " << line_seg.end_point << std::endl;
+        lock.unlock();
+        exit(1);
+      }
+      residuals[0] = (r / T(point_num)) + dist;
       return true;
     }
 
     FitLineResidual(const LineSegment& line_seg,
-                    const vector<Vector2f> points) :
+                    const Vector2f point,
+                    const Vector2f center_of_mass,
+                    const size_t point_num) :
                     line_seg(line_seg),
-                    points(points),
-                    center_of_points(GetCenterOfMass(points)) {}
+                    point(point),
+                    center_of_mass(center_of_mass),
+                    point_num(point_num) {}
 
-    static AutoDiffCostFunction<FitLineResidual, ceres::DYNAMIC, 2, 2>*
-    create(const LineSegment& line_seg, const vector<Vector2f> points) {
-      FitLineResidual *line_res = new FitLineResidual(line_seg, points);
-      return new AutoDiffCostFunction<FitLineResidual,
-                                      ceres::DYNAMIC, 2, 2>(line_res,
-                                                            points.size());
+    static AutoDiffCostFunction<FitLineResidual, 1, 2, 2>*
+    create(const LineSegment& line_seg,
+           const Vector2f point,
+           const Vector2f center_of_mass,
+           const size_t point_num) {
+      FitLineResidual *line_res = new FitLineResidual(line_seg, point, center_of_mass, point_num);
+      return new AutoDiffCostFunction<FitLineResidual, 1, 2, 2>(line_res);
     }
 
     const LineSegment line_seg;
-    const vector<Vector2f> points;
-    const Vector2f center_of_points;
+    const Vector2f point;
+    const Vector2f center_of_mass;
+    const size_t point_num;
 };
 
 LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
@@ -147,10 +186,17 @@ LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
   ceres::Problem problem;
   double first_point[] = {line.start_point.x(), line.start_point.y()};
   double second_point[] = {line.end_point.x(), line.end_point.y()};
-  problem.AddResidualBlock(FitLineResidual::create(line, pointcloud),
-                           NULL,
-                           first_point,
-                           second_point);
+  Vector2f center_of_mass = GetCenterOfMass(pointcloud);
+  size_t point_num = pointcloud.size();
+  for (const Vector2f& point : pointcloud) {
+    problem.AddResidualBlock(FitLineResidual::create(line,
+                                                     point,
+                                                     center_of_mass,
+                                                     point_num),
+                             NULL,
+                             first_point,
+                             second_point);
+  }
   ceres::Solve(options, &problem, &summary);
   Vector2f new_start_point(first_point[0], first_point[1]);
   Vector2f new_end_point(second_point[0], second_point[1]);
@@ -164,9 +210,15 @@ vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
     vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
+    if (neighborhood.size() == 0) {
+      break;
+    }
+    std::cout << "Running RANSAC" << std::endl;
     LineSegment line = RANSACLineSegment(neighborhood);
+    std::cout << "Get Inliers" << std::endl;
     vector<pair<int, Vector2f>> inliers = GetInliers(line, neighborhood);
     LineSegment new_line = FitLine(line, neighborhood);
+    std::cout << "Fitting Line" << std::endl;
     while ((new_line.start_point - line.start_point).norm() +
            (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD) {
       inliers = GetInliers(new_line, neighborhood);
@@ -181,11 +233,12 @@ vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
                                             pair<int, Vector2f> p2) {
       return p1.first < p2.first;
     });
+    CHECK_GE(inliers.size(), 2);
+    std::cout << "Removing: " << inliers.size() << std::endl;
     for (int64_t i = inliers.size() - 1; i >= 0; i--) {
-      std::remove(remaining_points.begin(),
-                  remaining_points.end(),
-                  inliers[i].second);
+      remaining_points.erase(remaining_points.begin() + inliers[i].first);
     }
+    std::cout << "Points Remaining: " << remaining_points.size() << std::endl;
   }
   return lines;
 }

@@ -9,4 +9,7 @@ macro(package_add_test TESTNAME)
 endmacro()
 
 package_add_test(stf_filter_tests stf_filter_test.cc)
-#package_add_test(line_extraction_test line_extraction_test.cc ../src/line_extraction.cc)
+package_add_test(line_extraction_test line_extraction_test.cc
+                                      ../src/line_extraction.cc
+                                      ../src/kdtree.cc
+                                      ../src/normal_computation.cc)

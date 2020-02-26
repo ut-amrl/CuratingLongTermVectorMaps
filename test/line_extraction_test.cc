@@ -55,7 +55,7 @@ TEST(ExtractLinesTest, TestExtractLinesOnBasicScan) {
                           std::floor(line.end_point.y() / 0.05),
                           line_color);
   }
-  display_1.display(lines_image);
+  display_1.display(lines_image.resize_doubleXY().resize_doubleXY());
   while(!display_1.is_closed()) {
     display_1.wait();
   }
