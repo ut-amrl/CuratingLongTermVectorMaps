@@ -10,7 +10,6 @@
 #include "Eigen/Dense"
 #include "ceres/ceres.h"
 
-#include "kdtree.h"
 #include "line_extraction.h"
 
 using std::vector;
@@ -45,14 +44,19 @@ LineSegment RANSACLineSegment(const vector<Vector2f> pointcloud) {
   LineSegment best_segment;
   size_t max_inlier_num = 0;
   srand(time(NULL));
+  // Loop through all pairs, or 1000 hundred of them if it's more than that
   for (size_t i = 0;
-       i < std::min(max_possible_pairs, static_cast<size_t>(100));
+       i < std::min(max_possible_pairs, static_cast<size_t>(1000));
        i++) {
-    Vector2f start_point = pointcloud[rand() % pointcloud.size()];
+    // Find all inliers between two different random points.
+    size_t start_point_index = rand() % pointcloud.size();
+    Vector2f start_point = pointcloud[start_point_index];
     Vector2f end_point;
+    size_t end_point_index;
     do {
-      end_point = pointcloud[rand() % pointcloud.size()];
-    } while (start_point == end_point);
+      end_point_index = rand() % pointcloud.size();
+      end_point = pointcloud[end_point_index];
+    } while (end_point_index == start_point_index);
     // Calculate the number of inliers, if more than best pair so far, save it.
     LineSegment line(start_point, end_point);
     size_t inlier_num = GetInliers(line, pointcloud).size();
@@ -117,24 +121,18 @@ struct FitLineResidual {
       // Find the centroid (missing denominator which is used later).
       T r = T((center_of_mass - line_seg.start_point).norm() +
             (center_of_mass - line_seg.end_point).norm());
-      T t;
-      if (abs((second_pointT - first_pointT).norm()) < 0.0001) {
-        // If the two points are basically the same point, then t should be 0 so later R will be the distance
-        // from the first_point to the pointT.
-        t = T(0);
-      } else {
-        t = (pointT - first_pointT).dot(second_pointT - first_pointT) /
-            (second_pointT - first_pointT).norm();
-      }
+      Vector2T diff_vec = second_pointT - first_pointT;
+      T t = (pointT - first_pointT).dot(diff_vec) /
+            (diff_vec.dot(diff_vec));
       T dist;
       if (t < T(0)) {
-        dist = (pointT - line_seg_start).norm();
+        dist = (pointT - line_seg_start).dot(pointT - line_seg_start);
       } else if (t > T(1)) {
-        dist = (pointT - line_seg_end).norm();
+        dist = (pointT - line_seg_end).dot(pointT - line_seg_end);
       } else {
         //dist = (pointT - first_pointT + t * (second_pointT - first_pointT)).norm();
-        Eigen::Hyperplane<T, 2> line = Eigen::Hyperplane<T, 2>::Through(first_pointT, second_pointT);
-        dist = line.absDistance(pointT);
+        Vector2T proj = line_seg_start + t * (diff_vec);
+        dist = (pointT - proj).dot(pointT - proj);
       }
       if (!ceres::isfinite((r / T(point_num)) + dist)) {
         lock.lock();
@@ -204,24 +202,28 @@ LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
 }
 
 vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
+  if (pointcloud.size() <= 1) {
+    return vector<LineSegment>();
+  }
   vector<Vector2f> remaining_points = pointcloud;
   vector<LineSegment> lines;
   while (remaining_points.size() > 1) {
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
-    vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
-    if (neighborhood.size() == 0) {
-      break;
-    }
+//    vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
+//    if (neighborhood.size() == 0) {
+//      break;
+//    }
     std::cout << "Running RANSAC" << std::endl;
-    LineSegment line = RANSACLineSegment(neighborhood);
+    LineSegment line = RANSACLineSegment(pointcloud);
     std::cout << "Get Inliers" << std::endl;
-    vector<pair<int, Vector2f>> inliers = GetInliers(line, neighborhood);
-    LineSegment new_line = FitLine(line, neighborhood);
+    vector<pair<int, Vector2f>> inliers = GetInliers(line, pointcloud);
+    CHECK_GE(inliers.size(), 2);
+    LineSegment new_line = FitLine(line, pointcloud);
     std::cout << "Fitting Line" << std::endl;
     while ((new_line.start_point - line.start_point).norm() +
            (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD) {
-      inliers = GetInliers(new_line, neighborhood);
+      inliers = GetInliers(new_line, pointcloud);
       line = new_line;
       new_line = FitLine(line, remaining_points);
     }
