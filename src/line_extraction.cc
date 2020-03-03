@@ -23,7 +23,7 @@ using ceres::AutoDiffCostFunction;
 #define INLIER_THRESHOLD 0.05
 #define CONVERGANCE_THRESHOLD 0.01
 #define NEIGHBORHOOD_SIZE 0.25
-#define NEIGHBORHOOD_GROWTH_SIZE 0.10
+#define NEIGHBORHOOD_GROWTH_SIZE 0.15
 
 namespace VectorMaps {
 
@@ -230,20 +230,20 @@ vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   while (remaining_points.size() > 1) {
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
-    std::cout << "Running RANSAC" << std::endl;
-    vector<Vector2f> neighborhood = GetNeighborhood(pointcloud);
+    vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
+    if (neighborhood.size() <= 0) {
+      break;
+    }
     LineSegment line = RANSACLineSegment(neighborhood);
-    vector<pair<int, Vector2f>> inliers = GetInliers(line, remaining_points);
-    LineSegment new_line = FitLine(line, GetPointsFromInliers(inliers));
-    std::cout << "Fitting Line" << std::endl;
+    LineSegment new_line = FitLine(line, neighborhood);
+    vector<pair<int, Vector2f>> inliers;
     do {
       inliers = GetInliers(new_line, remaining_points);
       line = new_line;
       new_line = FitLine(line, GetPointsFromInliers(inliers));
-      std::cout << "Inliers " << GetInliers(line, remaining_points).size() << std::endl;
       // Test if we get more inliers from increasing neighborhood
       LineSegment test_line = FitLine(new_line, GetNeighborhoodAroundLine(new_line, remaining_points));
-      if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
+      if (GetInliers(test_line, remaining_points).size() >= GetInliers(new_line, remaining_points).size()) {
         new_line = test_line;
       }
     } while ((new_line.start_point - line.start_point).norm() +
@@ -259,12 +259,12 @@ vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     if (inliers.size() < 2) {
       continue;
     }
-    std::cout << "Removing: " << inliers.size() << std::endl;
     for (int64_t i = inliers.size() - 1; i >= 0; i--) {
       remaining_points.erase(remaining_points.begin() + inliers[i].first);
     }
-    std::cout << "Points Remaining: " << remaining_points.size() << std::endl;
   }
+  std::cout << "Pointcloud size: " << pointcloud.size() << std::endl;
+  std::cout << "Lines size: " << lines.size() << std::endl;
   return lines;
 }
 
