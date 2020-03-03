@@ -11,6 +11,7 @@
 #include "ceres/ceres.h"
 
 #include "line_extraction.h"
+#include <DEBUG.h>
 
 using std::vector;
 using std::pair;
@@ -20,8 +21,9 @@ using Eigen::Vector2f;
 using ceres::AutoDiffCostFunction;
 
 #define INLIER_THRESHOLD 0.05
-#define CONVERGANCE_THRESHOLD 0.005
+#define CONVERGANCE_THRESHOLD 0.01
 #define NEIGHBORHOOD_SIZE 0.25
+#define NEIGHBORHOOD_GROWTH_SIZE 0.10
 
 namespace VectorMaps {
 
@@ -92,6 +94,16 @@ vector<Vector2f> GetNeighborhood(const vector<Vector2f> points) {
     }
   } while(neighborhood.size() <= 1);
   CHECK_GT(neighborhood.size(), 1);
+  return neighborhood;
+}
+
+vector<Vector2f> GetNeighborhoodAroundLine(const LineSegment& line, const vector<Vector2f> points) {
+  vector<Vector2f> neighborhood;
+  for (const Vector2f& p : points) {
+    if (line.DistanceToLineSegment(p) <= NEIGHBORHOOD_GROWTH_SIZE) {
+      neighborhood.push_back(p);
+    }
+  }
   return neighborhood;
 }
 
@@ -201,6 +213,14 @@ LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
   return LineSegment(new_start_point, new_end_point);
 }
 
+vector<Vector2f> GetPointsFromInliers(vector<pair<int, Vector2f>> inliers) {
+  vector<Vector2f> points;
+  for (const pair<int, Vector2f> p : inliers) {
+    points.push_back(p.second);
+  }
+  return points;
+}
+
 vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   if (pointcloud.size() <= 1) {
     return vector<LineSegment>();
@@ -210,23 +230,24 @@ vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   while (remaining_points.size() > 1) {
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
-//    vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
-//    if (neighborhood.size() == 0) {
-//      break;
-//    }
     std::cout << "Running RANSAC" << std::endl;
-    LineSegment line = RANSACLineSegment(pointcloud);
-    std::cout << "Get Inliers" << std::endl;
-    vector<pair<int, Vector2f>> inliers = GetInliers(line, pointcloud);
-    CHECK_GE(inliers.size(), 2);
-    LineSegment new_line = FitLine(line, pointcloud);
+    vector<Vector2f> neighborhood = GetNeighborhood(pointcloud);
+    LineSegment line = RANSACLineSegment(neighborhood);
+    vector<pair<int, Vector2f>> inliers = GetInliers(line, remaining_points);
+    LineSegment new_line = FitLine(line, GetPointsFromInliers(inliers));
     std::cout << "Fitting Line" << std::endl;
-    while ((new_line.start_point - line.start_point).norm() +
-           (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD) {
-      inliers = GetInliers(new_line, pointcloud);
+    do {
+      inliers = GetInliers(new_line, remaining_points);
       line = new_line;
-      new_line = FitLine(line, remaining_points);
-    }
+      new_line = FitLine(line, GetPointsFromInliers(inliers));
+      std::cout << "Inliers " << GetInliers(line, remaining_points).size() << std::endl;
+      // Test if we get more inliers from increasing neighborhood
+      LineSegment test_line = FitLine(new_line, GetNeighborhoodAroundLine(new_line, remaining_points));
+      if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
+        new_line = test_line;
+      }
+    } while ((new_line.start_point - line.start_point).norm() +
+             (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD);
     lines.push_back(new_line);
     // We have to remove the points that were assigned to this line.
     // Sort the inliers by their index so we don't get weird index problems.
@@ -235,7 +256,9 @@ vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
                                             pair<int, Vector2f> p2) {
       return p1.first < p2.first;
     });
-    CHECK_GE(inliers.size(), 2);
+    if (inliers.size() < 2) {
+      continue;
+    }
     std::cout << "Removing: " << inliers.size() << std::endl;
     for (int64_t i = inliers.size() - 1; i >= 0; i--) {
       remaining_points.erase(remaining_points.begin() + inliers[i].first);
