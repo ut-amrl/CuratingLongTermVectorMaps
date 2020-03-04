@@ -1,11 +1,10 @@
-//
-// Created by jack on 2/21/20.
-//
+/*
+ * Work Based on "Curating Long-Term Vector Maps" by Samer Nashed and Joydeep Biswas.
+ */
 
 #include <time.h>
 #include <vector>
 #include <thread>
-#include <mutex>
 
 #include "Eigen/Dense"
 #include "ceres/ceres.h"
@@ -24,6 +23,7 @@ using ceres::AutoDiffCostFunction;
 #define CONVERGANCE_THRESHOLD 0.01
 #define NEIGHBORHOOD_SIZE 0.25
 #define NEIGHBORHOOD_GROWTH_SIZE 0.15
+#define UNCERTAINTY_SAMPLE_NUM 1000
 
 namespace VectorMaps {
 
@@ -115,8 +115,6 @@ Vector2f GetCenterOfMass(const vector<Vector2f>& pointcloud) {
   return sum / pointcloud.size();
 }
 
-std::mutex lock;
-
 struct FitLineResidual {
     template<typename T>
     bool operator() (const T* first_point,
@@ -145,19 +143,6 @@ struct FitLineResidual {
         //dist = (pointT - first_pointT + t * (second_pointT - first_pointT)).norm();
         Vector2T proj = line_seg_start + t * (diff_vec);
         dist = (pointT - proj).dot(pointT - proj);
-      }
-      if (!ceres::isfinite((r / T(point_num)) + dist)) {
-        lock.lock();
-        std::cout << "R: " << r << std::endl;
-        std::cout << "P: " << point << std::endl;
-        std::cout << "FP: " << first_point[0] << " " << first_point[1] << std::endl;
-        std::cout << "SP: " << second_point[0] << " " << second_point[1] << std::endl;
-        std::cout << "Dist: " << dist << std::endl;
-        std::cout << "T: " << t << std::endl;
-        std::cout << "StP: " << line_seg.start_point << std::endl;
-        std::cout << "EnP: " << line_seg.end_point << std::endl;
-        lock.unlock();
-        exit(1);
       }
       residuals[0] = (r / T(point_num)) + dist;
       return true;
@@ -190,7 +175,7 @@ struct FitLineResidual {
 LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
-  options.linear_solver_type = ceres::DENSE_QR; // TODO: Testing to see if this is right.
+  options.linear_solver_type = ceres::DENSE_QR;
   options.minimizer_progress_to_stdout = false;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   ceres::Problem problem;
@@ -221,7 +206,7 @@ vector<Vector2f> GetPointsFromInliers(vector<pair<int, Vector2f>> inliers) {
   return points;
 }
 
-vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
+vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   if (pointcloud.size() <= 1) {
     return vector<LineSegment>();
   }
@@ -267,5 +252,57 @@ vector <LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   std::cout << "Lines size: " << lines.size() << std::endl;
   return lines;
 }
+
+Eigen::Matrix2f EstimateCovarianceFromPoints(const vector<Vector2f>& points) {
+  // TODO: This should be computing the scatter matrix and not the straight covariance matrix.
+  Eigen::Matrix2f covariance = Eigen::Matrix2f::Zero();
+  // Find means for covariance calculation
+  double x_mean = 0.0;
+  double y_mean = 0.0;
+  for (const Vector2f& p : points) {
+    x_mean += p.x();
+    y_mean += p.y();
+  }
+  x_mean /= points.size();
+  y_mean /= points.size();
+  // Find Covariances for each entry in the matrix.
+  for (const Vector2f& p : points) {
+    covariance(0, 0) += (p.x() - x_mean) * (p.x() - x_mean);
+    covariance(0, 1) += (p.x() - x_mean) * (p.y() - y_mean);
+    covariance(1, 0) += (p.y() - y_mean) * (p.x() - x_mean);
+    covariance(1, 1) += (p.y() - y_mean) * (p.y() - y_mean);
+  }
+  covariance(0, 0) /= points.size() - 1;
+  covariance(0, 1) /= points.size() - 1;
+  covariance(1, 0) /= points.size() - 1;
+  covariance(1, 1) /= points.size() - 1;
+  return covariance;
+}
+
+vector<LineCovariances> GetLineEndpointCovariances(const vector<LineSegment> lines,
+                                                   const vector<Vector2f>& points,
+                                                   const SensorCovParams& sensor_cov_params) {
+  vector<LineCovariances> line_endpoint_covariances;
+  for (LineSegment line : lines) {
+    vector<Vector2f> sample_start_points;
+    vector<Vector2f> sample_end_points;
+    vector<Vector2f> inliers = GetPointsFromInliers(GetInliers(line, points));
+    for (uint64_t iter = 0; iter < UNCERTAINTY_SAMPLE_NUM; iter++) {
+      vector<Vector2f> sampled_points;
+      for (const Vector2f& point : inliers) {
+        const Eigen::Matrix2f sensor_cov = GetSensorCovariance()
+        const Vector2f sampled_point = Sample(point, sample_point, sensor_cov);
+        sampled_points.push_back(sampled_point)
+      }
+      LineSegment sampled_line = FitLine(RANSACLineSegment(sampled_points), sampled_points);
+      sample_start_points.push_back(sampled_line.start_point);
+      sample_start_points.push_back(sampled_line.end_point);
+    }
+    Eigen::Matrix3f start_point_cov = EstimateCovarianceFromPoints(sample_start_points);
+    Eigen::Matrix3f end_point_cov = EstimateCovarianceFromPoints(sample_end_points);
+    line_endpoint_covariances.emplace_back(start_point_cov, end_point_cov);
+  }
+}
+
 
 }
