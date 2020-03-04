@@ -11,8 +11,9 @@ void SDFTable::updateWeightAndDistance(Vector2f point, double signed_dist) {
     double curr_d = ((signed_dist > Constants::delta) ? Constants::delta : (abs(signed_dist) <= Constants::delta) ? signed_dist : (signed_dist > -Constants::delta) ? -Constants::delta : saved_distance);
     double curr_w = ((abs(signed_dist) < Constants::epsilon) ? 1 : (abs(signed_dist) <= Constants::delta) ? exp(G) : 0);
 
-    double new_d = (saved_weight * saved_distance) + (curr_w * curr_d) / (saved_weight + curr_w);
+    double new_d = saved_weight > 0 ? ((saved_weight * saved_distance) + (curr_w * curr_d)) / (saved_weight + curr_w) : curr_d;
     double new_w = (curr_w + saved_weight);
+
     setPointDistance(point, new_d);
     setPointWeight(point, new_w);
 }
@@ -66,3 +67,21 @@ void SDFTable::updateWithSDF(SDFTable& shortTermSDF) {
   // TODO: Figure out how to do weighted average?
   weights_ = shortTermSDF.GetWeightDebugImage();
 }
+
+void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud, std::vector<Vector2f>& filtered_point_cloud) {
+    double max_weight = weights_.max();
+    // TODO: move to .h
+    double T = 0.95 * max_weight;
+    double D = 0.05;
+
+    for (size_t j = 0; j < point_cloud.size(); ++j) {
+      const Vector2f point = point_cloud[j];
+
+      double weight = this->getPointWeight(point);
+      double distance = this->getPointDistance(point);
+
+      if (weight > T && fabs(distance) < D) {
+        filtered_point_cloud.push_back(point);
+      }
+    }
+  }

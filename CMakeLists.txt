@@ -46,7 +46,9 @@ SET(libs roslib roscpp rosbag console_bridge cv_bridge gflags glog boost_system 
 
 ROSBUILD_ADD_EXECUTABLE(stf_filter
                         src/stf_filter.cc
-			src/SDFTable.cc)
+                        src/SDFTable.cc
+                        src/pointcloud_helpers.cc
+                    )
                         
 TARGET_LINK_LIBRARIES(stf_filter
                       ${libs}

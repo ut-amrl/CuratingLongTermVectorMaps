@@ -109,6 +109,8 @@ class SDFTable {
     void populateFromScan(sensor_msgs::LaserScan &laser_scan, bool truncate_ends, Eigen::Vector2f location, Eigen::Rotation2Df orientation);
     void normalizeWeights();
     void updateWithSDF(SDFTable &shortTermSDF);
+
+    void filterCloud(const std::vector<Vector2f>& point_cloud, std::vector<Vector2f>& filtered_point_cloud);
 };
 
 #endif  // SRC_SDFTABLE_H
