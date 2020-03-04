@@ -5,6 +5,8 @@
 #include <iostream>
 #include <iterator>
 
+#include <pcl_ros/point_cloud.h>
+#include <pcl/conversions.h>
 #include "ros/node_handle.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
@@ -20,6 +22,7 @@
 using std::string;
 using std::vector;
 using namespace Eigen;
+typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 
 DEFINE_string(
   bag_file,
@@ -64,6 +67,7 @@ void populateSDFTableFromBagFile(SDFTable& sdf, rosbag::Bag& bag) {
       if (laser_scan != nullptr) {
         // Process the laser scan
         sdf.populateFromScan(*laser_scan, true, lastLoc, lastOrientation);
+        // sdf.normalizeWeights();
       }
 
       geometry_msgs::PosePtr pose =
@@ -101,6 +105,9 @@ void filter_short_term_features(string bag_path) {
 
   cimg_library::CImgDisplay display1;
   display1.display(sdf.GetDistanceDebugImage().resize_doubleXY().normalize());
+  
+  rosbag::Bag writeBag;
+  writeBag.open(bag_path + ".filtered", rosbag::bagmode::Write);
 
   printf("Filtering point clouds...\n");
   vector<string> topics;
@@ -128,7 +135,21 @@ void filter_short_term_features(string bag_path) {
         std::vector<Vector2f> filtered;
         sdf.filterCloud(cloud, filtered);
 
-        printf("Filtered cloud has %lu points, compared to %lu\n", filtered.size(), cloud.size());
+        PointCloud pcl_msg;
+
+        pcl_msg.header.frame_id = "cloud";
+        pcl_msg.height = 1;
+        pcl_msg.width = filtered.size();
+
+        for (auto point : filtered) {
+          pcl_msg.points.push_back(pcl::PointXYZ(point.x(), point.y(), 0));
+        }
+
+        sensor_msgs::PointCloud2 msg;
+        pcl::toROSMsg(pcl_msg, msg);
+
+        writeBag.write("/filtered", ros::Time(laser_scan->header.stamp.sec + laser_scan->header.stamp.nsec*1e-9), msg);
+        printf("Filtered scans has %lu points of %lu\n", filtered.size(), cloud.size());
         filteredClouds.push_back(filtered);
       }
 
@@ -147,6 +168,7 @@ void filter_short_term_features(string bag_path) {
     }
   }
 
+  writeBag.close();
   bag.close();
   printf("Done.\n");
   fflush(stdout);
