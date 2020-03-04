@@ -254,8 +254,7 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
 }
 
 Eigen::Matrix2f EstimateCovarianceFromPoints(const vector<Vector2f>& points) {
-  // TODO: This should be computing the scatter matrix and not the straight covariance matrix.
-  Eigen::Matrix2f covariance = Eigen::Matrix2f::Zero();
+  Eigen::Matrix2f scatter_matrix = Eigen::Matrix2f::Zero();
   // Find means for covariance calculation
   double x_mean = 0.0;
   double y_mean = 0.0;
@@ -267,16 +266,47 @@ Eigen::Matrix2f EstimateCovarianceFromPoints(const vector<Vector2f>& points) {
   y_mean /= points.size();
   // Find Covariances for each entry in the matrix.
   for (const Vector2f& p : points) {
-    covariance(0, 0) += (p.x() - x_mean) * (p.x() - x_mean);
-    covariance(0, 1) += (p.x() - x_mean) * (p.y() - y_mean);
-    covariance(1, 0) += (p.y() - y_mean) * (p.x() - x_mean);
-    covariance(1, 1) += (p.y() - y_mean) * (p.y() - y_mean);
+    scatter_matrix(0, 0) += (p.x() - x_mean) * (p.x() - x_mean);
+    scatter_matrix(0, 1) += (p.x() - x_mean) * (p.y() - y_mean);
+    scatter_matrix(1, 0) += (p.y() - y_mean) * (p.x() - x_mean);
+    scatter_matrix(1, 1) += (p.y() - y_mean) * (p.y() - y_mean);
   }
-  covariance(0, 0) /= points.size() - 1;
-  covariance(0, 1) /= points.size() - 1;
-  covariance(1, 0) /= points.size() - 1;
-  covariance(1, 1) /= points.size() - 1;
+  Eigen::Matrix2f covariance = Eigen::Matrix2f::Zero();
+  covariance(0, 0) = scatter_matrix(0, 0) / (points.size() - 1);
+  covariance(0, 1) = scatter_matrix(0, 1) / (points.size() - 1);
+  covariance(1, 0) = scatter_matrix(1, 0) / (points.size() - 1);
+  covariance(1, 1) = scatter_matrix(1, 1) / (points.size() - 1);
   return covariance;
+}
+
+/*
+ * Returns point sampled from a gaussian around this source_point,
+ * characterized by the covariance.
+ */
+Vector2f Sample(const Vector2f source_point, Eigen::Matrix2f covariance) {
+  std::default_random_engine gen;
+  std::normal_distribution x_dist(source_point.x(), covariance(0, 0));
+  std::normal_distribution y_dist(source_point.y(), covariance(1, 1));
+  double rand_x = x_dist(gen);
+  double rand_y = y_dist(gen);
+  return Vector2f(rand_x, rand_y);
+}
+
+Eigen::Matrix2f GetSensorCovariance(const Vector2f& point, const SensorCovParams& cov_params) {
+  // Assumes that pointclouds are centered at (0,0).
+  double range = point.norm();
+  // Assumes that pointclouds are oriented towards (1, 0) always.
+  Vector2f viewpoint(1, 0);
+  double angle = acos((point / range).dot(viewpoint));
+  Eigen::Matrix2f sensor_covariance;
+  sensor_covariance << 2 * (sin(angle) * sin(angle)), -sin(2 * angle), -sin(2 * angle), 2 * (cos(angle) * cos(angle));
+  double scaling_factor_1 = (range * range * cov_params.std_dev_angle * cov_params.std_dev_angle) / 2;
+  sensor_covariance = scaling_factor_1 * sensor_covariance;
+  Eigen::Matrix2f mat_2;
+  mat_2 << cos(angle) * cos(angle), sin(2 * angle), sin(2 * angle), 2 * sin(angle) * sin(angle);
+  double scaling_factor_2 = cov_params.std_dev_range / 2;
+  mat_2 = scaling_factor_2 * mat_2;
+  return sensor_covariance + mat_2;
 }
 
 vector<LineCovariances> GetLineEndpointCovariances(const vector<LineSegment> lines,
@@ -290,7 +320,7 @@ vector<LineCovariances> GetLineEndpointCovariances(const vector<LineSegment> lin
     for (uint64_t iter = 0; iter < UNCERTAINTY_SAMPLE_NUM; iter++) {
       vector<Vector2f> sampled_points;
       for (const Vector2f& point : inliers) {
-        const Eigen::Matrix2f sensor_cov = GetSensorCovariance()
+        const Eigen::Matrix2f sensor_cov = GetSensorCovariance(point, sensor_cov_params);
         const Vector2f sampled_point = Sample(point, sample_point, sensor_cov);
         sampled_points.push_back(sampled_point)
       }
