@@ -1,5 +1,6 @@
 /*
- * Work Based on "Curating Long-Term Vector Maps" by Samer Nashed and Joydeep Biswas.
+ * Work Based on "Curating Long-Term Vector Maps"
+ * by Samer Nashed and Joydeep Biswas.
  */
 
 #include <time.h>
@@ -10,6 +11,7 @@
 #include "ceres/ceres.h"
 
 #include "line_extraction.h"
+
 #include <DEBUG.h>
 
 using std::vector;
@@ -71,7 +73,7 @@ LineSegment RANSACLineSegment(const vector<Vector2f> pointcloud) {
   return best_segment;
 }
 
-vector<Vector2f> GetNeighborhood(const vector<Vector2f> points) {
+vector<Vector2f> GetNeighborhood(vector<Vector2f>& points) {
   // Pick a random point to center this around.
   vector<Vector2f> remaining_points = points;
   srand(time(NULL));
@@ -90,7 +92,18 @@ vector<Vector2f> GetNeighborhood(const vector<Vector2f> points) {
       }
     }
     if (neighborhood.size() <= 1) {
-      remaining_points.erase(remaining_points.begin() + rand_idx);
+      // Remove the point both from the points we are searching in, and from the
+      // original list, as its an outlier.
+      bool found = false;
+      for (size_t p_index = 0; p_index < points.size(); p_index++) {
+        if (points[p_index].x() == center_point.x() && points[p_index].y() == center_point.y()) {
+          points.erase(points.begin() + p_index);
+          remaining_points.erase(remaining_points.begin() + rand_idx);
+          found = true;
+          break;
+        }
+      }
+      CHECK(found) << "Didn't find point in overall list of points.";
     }
   } while(neighborhood.size() <= 1);
   CHECK_GT(neighborhood.size(), 1);
@@ -122,29 +135,26 @@ struct FitLineResidual {
                      T* residuals) const {
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
       // Cast everything over to generic
+      //const Vector2T center = center_of_mass.cast<T>();
       const Vector2T first_pointT(first_point[0], first_point[1]);
       const Vector2T second_pointT(second_point[0], second_point[1]);
       const Vector2T pointT = point.cast<T>();
-      //Vector2T center = center_of_mass.cast<T>();
-      Vector2T line_seg_start = line_seg.start_point.cast<T>();
-      Vector2T line_seg_end = line_seg.end_point.cast<T>();
-      // Find the centroid (missing denominator which is used later).
-      T r = T((center_of_mass - line_seg.start_point).norm() +
-            (center_of_mass - line_seg.end_point).norm());
       Vector2T diff_vec = second_pointT - first_pointT;
       T t = (pointT - first_pointT).dot(diff_vec) /
             (diff_vec.dot(diff_vec));
+      //T dist_from_center = (center - first_pointT).dot(center - first_pointT) +
+      //  (center - second_pointT).dot(center - second_pointT);
       T dist;
       if (t < T(0)) {
-        dist = (pointT - line_seg_start).dot(pointT - line_seg_start);
+        dist = (pointT - first_pointT).dot(pointT - first_pointT);
       } else if (t > T(1)) {
-        dist = (pointT - line_seg_end).dot(pointT - line_seg_end);
+        dist = (pointT - second_pointT).dot(pointT - second_pointT);
       } else {
-        //dist = (pointT - first_pointT + t * (second_pointT - first_pointT)).norm();
-        Vector2T proj = line_seg_start + t * (diff_vec);
+        Vector2T proj = first_pointT + t * (diff_vec);
         dist = (pointT - proj).dot(pointT - proj);
       }
-      residuals[0] = (r / T(point_num)) + dist;
+      residuals[0] = dist;
+      //residuals[1] = dist_from_center / T(point_num);
       return true;
     }
 
@@ -206,6 +216,24 @@ vector<Vector2f> GetPointsFromInliers(vector<pair<int, Vector2f>> inliers) {
   return points;
 }
 
+LineSegment ClipLineToInliers(const LineSegment& line,
+                              const vector<Vector2f>& points) {
+  CHECK_GT(points.size(), 1);
+  Vector2f closest_to_start = points[0];
+  Vector2f closest_to_end = points[0];
+  for (const Vector2f& p : points) {
+    if ((line.start_point - p).norm() <
+        (line.start_point - closest_to_start).norm()) {
+      closest_to_start = p;
+    }
+    if ((line.end_point - p).norm() <
+        (line.end_point - closest_to_end).norm()) {
+      closest_to_end = p;
+    }
+  }
+  return LineSegment(closest_to_start, closest_to_end);
+}
+
 vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   if (pointcloud.size() <= 1) {
     return vector<LineSegment>();
@@ -222,16 +250,32 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     LineSegment line = RANSACLineSegment(neighborhood);
     LineSegment new_line = FitLine(line, neighborhood);
     vector<pair<int, Vector2f>> inliers;
+    bool grew = false;
+    new_line.start_point = Vector2f(1.3, 1);
+    new_line.end_point = Vector2f(1.74, 1);
     do {
-      inliers = GetInliers(new_line, remaining_points);
-      line = new_line;
-      new_line = FitLine(line, GetPointsFromInliers(inliers));
-      // Test if we get more inliers from increasing neighborhood
-      LineSegment test_line = FitLine(new_line, GetNeighborhoodAroundLine(new_line, remaining_points));
-      if (GetInliers(test_line, remaining_points).size() >= GetInliers(new_line, remaining_points).size()) {
+      std::cout << "--- New Growth Phase ---" << std::endl;
+      grew = false;
+      std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
+      std::cout << "Went from considering: " << neighborhood.size() << " to " << GetNeighborhoodAroundLine(new_line, remaining_points).size() << std::endl;
+      LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
+      test_line = ClipLineToInliers(test_line, GetPointsFromInliers(GetInliers(test_line, neighborhood_to_consider)));
+      std::cout << "Inlier # " << GetInliers(new_line, remaining_points).size() << std::endl;
+      std::cout << "Now is: " << GetInliers(test_line, remaining_points).size() << std::endl;
+      if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
+        grew = true;
+        std::cout << "Growing" << std::endl;
+        neighborhood = neighborhood_to_consider;
         new_line = test_line;
+        std::cout << "Post Growth: Line from: " << new_line.start_point << " " << new_line.end_point << std::endl;
       }
-    } while ((new_line.start_point - line.start_point).norm() +
+      line = new_line;
+      new_line = FitLine(line, neighborhood);
+
+      // Test if we get more inliers from increasing neighborhood
+      std::cout << "Post N, Fit: Line from: " << line.start_point << " " << line.end_point << std::endl;
+      WaitForClose(DoubleSize(DrawLine(new_line.start_point, new_line.end_point, DrawPoints(pointcloud))));
+    } while (grew || (new_line.start_point - line.start_point).norm() +
              (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD);
     lines.push_back(new_line);
     // We have to remove the points that were assigned to this line.
@@ -252,87 +296,87 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   std::cout << "Lines size: " << lines.size() << std::endl;
   return lines;
 }
-
-Eigen::Matrix2f EstimateCovarianceFromPoints(const vector<Vector2f>& points) {
-  Eigen::Matrix2f scatter_matrix = Eigen::Matrix2f::Zero();
-  // Find means for covariance calculation
-  double x_mean = 0.0;
-  double y_mean = 0.0;
-  for (const Vector2f& p : points) {
-    x_mean += p.x();
-    y_mean += p.y();
-  }
-  x_mean /= points.size();
-  y_mean /= points.size();
-  // Find Covariances for each entry in the matrix.
-  for (const Vector2f& p : points) {
-    scatter_matrix(0, 0) += (p.x() - x_mean) * (p.x() - x_mean);
-    scatter_matrix(0, 1) += (p.x() - x_mean) * (p.y() - y_mean);
-    scatter_matrix(1, 0) += (p.y() - y_mean) * (p.x() - x_mean);
-    scatter_matrix(1, 1) += (p.y() - y_mean) * (p.y() - y_mean);
-  }
-  Eigen::Matrix2f covariance = Eigen::Matrix2f::Zero();
-  covariance(0, 0) = scatter_matrix(0, 0) / (points.size() - 1);
-  covariance(0, 1) = scatter_matrix(0, 1) / (points.size() - 1);
-  covariance(1, 0) = scatter_matrix(1, 0) / (points.size() - 1);
-  covariance(1, 1) = scatter_matrix(1, 1) / (points.size() - 1);
-  return covariance;
-}
+//
+//Eigen::Matrix2f EstimateCovarianceFromPoints(const vector<Vector2f>& points) {
+//  Eigen::Matrix2f scatter_matrix = Eigen::Matrix2f::Zero();
+//  // Find means for covariance calculation
+//  double x_mean = 0.0;
+//  double y_mean = 0.0;
+//  for (const Vector2f& p : points) {
+//    x_mean += p.x();
+//    y_mean += p.y();
+//  }
+//  x_mean /= points.size();
+//  y_mean /= points.size();
+//  // Find Covariances for each entry in the matrix.
+//  for (const Vector2f& p : points) {
+//    scatter_matrix(0, 0) += (p.x() - x_mean) * (p.x() - x_mean);
+//    scatter_matrix(0, 1) += (p.x() - x_mean) * (p.y() - y_mean);
+//    scatter_matrix(1, 0) += (p.y() - y_mean) * (p.x() - x_mean);
+//    scatter_matrix(1, 1) += (p.y() - y_mean) * (p.y() - y_mean);
+//  }
+//  Eigen::Matrix2f covariance = Eigen::Matrix2f::Zero();
+//  covariance(0, 0) = scatter_matrix(0, 0) / (points.size() - 1);
+//  covariance(0, 1) = scatter_matrix(0, 1) / (points.size() - 1);
+//  covariance(1, 0) = scatter_matrix(1, 0) / (points.size() - 1);
+//  covariance(1, 1) = scatter_matrix(1, 1) / (points.size() - 1);
+//  return covariance;
+//}
 
 /*
  * Returns point sampled from a gaussian around this source_point,
  * characterized by the covariance.
  */
-Vector2f Sample(const Vector2f source_point, Eigen::Matrix2f covariance) {
-  std::default_random_engine gen;
-  std::normal_distribution x_dist(source_point.x(), covariance(0, 0));
-  std::normal_distribution y_dist(source_point.y(), covariance(1, 1));
-  double rand_x = x_dist(gen);
-  double rand_y = y_dist(gen);
-  return Vector2f(rand_x, rand_y);
-}
-
-Eigen::Matrix2f GetSensorCovariance(const Vector2f& point, const SensorCovParams& cov_params) {
-  // Assumes that pointclouds are centered at (0,0).
-  double range = point.norm();
-  // Assumes that pointclouds are oriented towards (1, 0) always.
-  Vector2f viewpoint(1, 0);
-  double angle = acos((point / range).dot(viewpoint));
-  Eigen::Matrix2f sensor_covariance;
-  sensor_covariance << 2 * (sin(angle) * sin(angle)), -sin(2 * angle), -sin(2 * angle), 2 * (cos(angle) * cos(angle));
-  double scaling_factor_1 = (range * range * cov_params.std_dev_angle * cov_params.std_dev_angle) / 2;
-  sensor_covariance = scaling_factor_1 * sensor_covariance;
-  Eigen::Matrix2f mat_2;
-  mat_2 << cos(angle) * cos(angle), sin(2 * angle), sin(2 * angle), 2 * sin(angle) * sin(angle);
-  double scaling_factor_2 = cov_params.std_dev_range / 2;
-  mat_2 = scaling_factor_2 * mat_2;
-  return sensor_covariance + mat_2;
-}
-
-vector<LineCovariances> GetLineEndpointCovariances(const vector<LineSegment> lines,
-                                                   const vector<Vector2f>& points,
-                                                   const SensorCovParams& sensor_cov_params) {
-  vector<LineCovariances> line_endpoint_covariances;
-  for (LineSegment line : lines) {
-    vector<Vector2f> sample_start_points;
-    vector<Vector2f> sample_end_points;
-    vector<Vector2f> inliers = GetPointsFromInliers(GetInliers(line, points));
-    for (uint64_t iter = 0; iter < UNCERTAINTY_SAMPLE_NUM; iter++) {
-      vector<Vector2f> sampled_points;
-      for (const Vector2f& point : inliers) {
-        const Eigen::Matrix2f sensor_cov = GetSensorCovariance(point, sensor_cov_params);
-        const Vector2f sampled_point = Sample(point, sample_point, sensor_cov);
-        sampled_points.push_back(sampled_point)
-      }
-      LineSegment sampled_line = FitLine(RANSACLineSegment(sampled_points), sampled_points);
-      sample_start_points.push_back(sampled_line.start_point);
-      sample_start_points.push_back(sampled_line.end_point);
-    }
-    Eigen::Matrix3f start_point_cov = EstimateCovarianceFromPoints(sample_start_points);
-    Eigen::Matrix3f end_point_cov = EstimateCovarianceFromPoints(sample_end_points);
-    line_endpoint_covariances.emplace_back(start_point_cov, end_point_cov);
-  }
-}
+//Vector2f Sample(const Vector2f source_point, Eigen::Matrix2f covariance) {
+//  std::default_random_engine gen;
+//  std::normal_distribution x_dist(source_point.x(), covariance(0, 0));
+//  std::normal_distribution y_dist(source_point.y(), covariance(1, 1));
+//  double rand_x = x_dist(gen);
+//  double rand_y = y_dist(gen);
+//  return Vector2f(rand_x, rand_y);
+//}
+//
+//Eigen::Matrix2f GetSensorCovariance(const Vector2f& point, const SensorCovParams& cov_params) {
+//  // Assumes that pointclouds are centered at (0,0).
+//  double range = point.norm();
+//  // Assumes that pointclouds are oriented towards (1, 0) always.
+//  Vector2f viewpoint(1, 0);
+//  double angle = acos((point / range).dot(viewpoint));
+//  Eigen::Matrix2f sensor_covariance;
+//  sensor_covariance << 2 * (sin(angle) * sin(angle)), -sin(2 * angle), -sin(2 * angle), 2 * (cos(angle) * cos(angle));
+//  double scaling_factor_1 = (range * range * cov_params.std_dev_angle * cov_params.std_dev_angle) / 2;
+//  sensor_covariance = scaling_factor_1 * sensor_covariance;
+//  Eigen::Matrix2f mat_2;
+//  mat_2 << cos(angle) * cos(angle), sin(2 * angle), sin(2 * angle), 2 * sin(angle) * sin(angle);
+//  double scaling_factor_2 = cov_params.std_dev_range / 2;
+//  mat_2 = scaling_factor_2 * mat_2;
+//  return sensor_covariance + mat_2;
+//}
+//
+//vector<LineCovariances> GetLineEndpointCovariances(const vector<LineSegment> lines,
+//                                                   const vector<Vector2f>& points,
+//                                                   const SensorCovParams& sensor_cov_params) {
+//  vector<LineCovariances> line_endpoint_covariances;
+//  for (LineSegment line : lines) {
+//    vector<Vector2f> sample_start_points;
+//    vector<Vector2f> sample_end_points;
+//    vector<Vector2f> inliers = GetPointsFromInliers(GetInliers(line, points));
+//    for (uint64_t iter = 0; iter < UNCERTAINTY_SAMPLE_NUM; iter++) {
+//      vector<Vector2f> sampled_points;
+//      for (const Vector2f& point : inliers) {
+//        const Eigen::Matrix2f sensor_cov = GetSensorCovariance(point, sensor_cov_params);
+//        const Vector2f sampled_point = Sample(point, sample_point, sensor_cov);
+//        sampled_points.push_back(sampled_point)
+//      }
+//      LineSegment sampled_line = FitLine(RANSACLineSegment(sampled_points), sampled_points);
+//      sample_start_points.push_back(sampled_line.start_point);
+//      sample_start_points.push_back(sampled_line.end_point);
+//    }
+//    Eigen::Matrix3f start_point_cov = EstimateCovarianceFromPoints(sample_start_points);
+//    Eigen::Matrix3f end_point_cov = EstimateCovarianceFromPoints(sample_end_points);
+//    line_endpoint_covariances.emplace_back(start_point_cov, end_point_cov);
+//  }
+//}
 
 
 }
