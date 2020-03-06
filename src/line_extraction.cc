@@ -26,6 +26,11 @@ using ceres::AutoDiffCostFunction;
 #define NEIGHBORHOOD_SIZE 0.25
 #define NEIGHBORHOOD_GROWTH_SIZE 0.15
 #define UNCERTAINTY_SAMPLE_NUM 1000
+#define RESIDUAL_CLOSE_POINTS_EPSILON 0.00001
+
+//TODO : Implement square root fix. If two points are sufficiently close, then always use endpoint distance.
+//TODO : Expose both components of vector to the solver.
+//TODO : Penalize the line length exponentially when more than the longest distance along the line.
 
 namespace VectorMaps {
 
@@ -128,6 +133,35 @@ Vector2f GetCenterOfMass(const vector<Vector2f>& pointcloud) {
   return sum / pointcloud.size();
 }
 
+struct LineLengthResidual {
+    template <typename T>
+    bool operator() (const T* first_point,
+                     const T* second_point,
+                     T* residuals) const {
+      typedef Eigen::Matrix<T, 2, 1> Vector2T;
+      const Vector2T first_pointT(first_point[0], first_point[1]);
+      const Vector2T second_pointT(second_point[0], second_point[1]);
+      Vector2T diff_vec = first_pointT - second_pointT;
+      if (diff_vec.x() + diff_vec.y() < RESIDUAL_CLOSE_POINTS_EPSILON) {
+        residuals[0] = T(0);
+      } else if (diff_vec.norm() <= T(line_length_max)) {
+        residuals[0] = diff_vec.norm();
+      } else {
+        residuals[0] = diff_vec.dot(diff_vec);
+      }
+      return true;
+    }
+
+    LineLengthResidual(const double line_length_max) : line_length_max(line_length_max) {}
+
+    static AutoDiffCostFunction<LineLengthResidual, 1, 2, 2>* create(const double line_length_max) {
+      LineLengthResidual *res = new LineLengthResidual(line_length_max);
+      return new AutoDiffCostFunction<LineLengthResidual, 1, 2, 2>(res);
+    }
+
+    const double line_length_max;
+};
+
 struct FitLineResidual {
     template<typename T>
     bool operator() (const T* first_point,
@@ -135,26 +169,24 @@ struct FitLineResidual {
                      T* residuals) const {
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
       // Cast everything over to generic
-      //const Vector2T center = center_of_mass.cast<T>();
       const Vector2T first_pointT(first_point[0], first_point[1]);
       const Vector2T second_pointT(second_point[0], second_point[1]);
       const Vector2T pointT = point.cast<T>();
       Vector2T diff_vec = second_pointT - first_pointT;
       T t = (pointT - first_pointT).dot(diff_vec) /
             (diff_vec.dot(diff_vec));
-      //T dist_from_center = (center - first_pointT).dot(center - first_pointT) +
-      //  (center - second_pointT).dot(center - second_pointT);
-      T dist;
+      Vector2T dist_vec;
+      // If points are sufficiently close then its the same as being closer to the start_point of the line.
       if (t < T(0)) {
-        dist = (pointT - first_pointT).dot(pointT - first_pointT);
+        dist_vec = pointT - first_pointT;
       } else if (t > T(1)) {
-        dist = (pointT - second_pointT).dot(pointT - second_pointT);
+        dist_vec = second_pointT - pointT;
       } else {
         Vector2T proj = first_pointT + t * (diff_vec);
-        dist = (pointT - proj).dot(pointT - proj);
+        dist_vec = (pointT - proj);
       }
-      residuals[0] = dist;
-      //residuals[1] = dist_from_center / T(point_num);
+      residuals[0] = dist_vec.x();
+      residuals[1] = dist_vec.y();
       return true;
     }
 
@@ -167,13 +199,13 @@ struct FitLineResidual {
                     center_of_mass(center_of_mass),
                     point_num(point_num) {}
 
-    static AutoDiffCostFunction<FitLineResidual, 1, 2, 2>*
+    static AutoDiffCostFunction<FitLineResidual, 2, 2, 2>*
     create(const LineSegment& line_seg,
            const Vector2f point,
            const Vector2f center_of_mass,
            const size_t point_num) {
       FitLineResidual *line_res = new FitLineResidual(line_seg, point, center_of_mass, point_num);
-      return new AutoDiffCostFunction<FitLineResidual, 1, 2, 2>(line_res);
+      return new AutoDiffCostFunction<FitLineResidual, 2, 2, 2>(line_res);
     }
 
     const LineSegment line_seg;
@@ -181,6 +213,18 @@ struct FitLineResidual {
     const Vector2f center_of_mass;
     const size_t point_num;
 };
+
+double FindMaxDistance(const vector<Vector2f>& points) {
+  double max_dist = 0.0;
+  for (const Vector2f& p1 : points) {
+    for (const Vector2f& p2 : points) {
+      if ((p1 - p2).norm() > max_dist) {
+        max_dist = (p1 - p2).norm();
+      }
+    }
+  }
+  return max_dist;
+}
 
 LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
   ceres::Solver::Options options;
@@ -202,6 +246,8 @@ LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
                              first_point,
                              second_point);
   }
+  const double max_distance = FindMaxDistance(pointcloud);
+  problem.AddResidualBlock(LineLengthResidual::create(max_distance), NULL, first_point, second_point);
   ceres::Solve(options, &problem, &summary);
   Vector2f new_start_point(first_point[0], first_point[1]);
   Vector2f new_end_point(second_point[0], second_point[1]);
@@ -216,24 +262,6 @@ vector<Vector2f> GetPointsFromInliers(vector<pair<int, Vector2f>> inliers) {
   return points;
 }
 
-LineSegment ClipLineToInliers(const LineSegment& line,
-                              const vector<Vector2f>& points) {
-  CHECK_GT(points.size(), 1);
-  Vector2f closest_to_start = points[0];
-  Vector2f closest_to_end = points[0];
-  for (const Vector2f& p : points) {
-    if ((line.start_point - p).norm() <
-        (line.start_point - closest_to_start).norm()) {
-      closest_to_start = p;
-    }
-    if ((line.end_point - p).norm() <
-        (line.end_point - closest_to_end).norm()) {
-      closest_to_end = p;
-    }
-  }
-  return LineSegment(closest_to_start, closest_to_end);
-}
-
 vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   if (pointcloud.size() <= 1) {
     return vector<LineSegment>();
@@ -241,6 +269,7 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   vector<Vector2f> remaining_points = pointcloud;
   vector<LineSegment> lines;
   while (remaining_points.size() > 1) {
+    std::cout << "Remaining Points : " << remaining_points.size() << std::endl;
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
     vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
@@ -250,32 +279,27 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     LineSegment line = RANSACLineSegment(neighborhood);
     LineSegment new_line = FitLine(line, neighborhood);
     vector<pair<int, Vector2f>> inliers;
-    bool grew = false;
-    new_line.start_point = Vector2f(1.3, 1);
-    new_line.end_point = Vector2f(1.74, 1);
     do {
-      std::cout << "--- New Growth Phase ---" << std::endl;
-      grew = false;
+      line = new_line;
       std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
-      std::cout << "Went from considering: " << neighborhood.size() << " to " << GetNeighborhoodAroundLine(new_line, remaining_points).size() << std::endl;
+      std::cout << "Went from considering: " << GetInliers(new_line, remaining_points).size() << " to " << GetNeighborhoodAroundLine(new_line, remaining_points).size() << std::endl;
       LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
-      test_line = ClipLineToInliers(test_line, GetPointsFromInliers(GetInliers(test_line, neighborhood_to_consider)));
       std::cout << "Inlier # " << GetInliers(new_line, remaining_points).size() << std::endl;
       std::cout << "Now is: " << GetInliers(test_line, remaining_points).size() << std::endl;
       if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
-        grew = true;
-        std::cout << "Growing" << std::endl;
-        neighborhood = neighborhood_to_consider;
         new_line = test_line;
         std::cout << "Post Growth: Line from: " << new_line.start_point << " " << new_line.end_point << std::endl;
       }
-      line = new_line;
-      new_line = FitLine(line, neighborhood);
+      //line = new_line;
+      //new_line = FitLine(line, GetPointsFromInliers(GetInliers(line, remaining_points)));
 
       // Test if we get more inliers from increasing neighborhood
       std::cout << "Post N, Fit: Line from: " << line.start_point << " " << line.end_point << std::endl;
-      WaitForClose(DoubleSize(DrawLine(new_line.start_point, new_line.end_point, DrawPoints(pointcloud))));
-    } while (grew || (new_line.start_point - line.start_point).norm() +
+      std::cout << "Post N, Fit: New Line from: " << new_line.start_point << " " << new_line.end_point << std::endl;
+      std::cout << "Change: " << (new_line.start_point - line.start_point).norm() +
+                                 (new_line.end_point - line.end_point).norm() << std::endl;
+      WaitForClose(DrawLine(new_line.start_point, new_line.end_point, DrawPoints(pointcloud)));
+    } while ((new_line.start_point - line.start_point).norm() +
              (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD);
     lines.push_back(new_line);
     // We have to remove the points that were assigned to this line.
