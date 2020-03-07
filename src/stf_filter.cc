@@ -67,7 +67,6 @@ void populateSDFTableFromBagFile(SDFTable& sdf, rosbag::Bag& bag) {
       if (laser_scan != nullptr) {
         // Process the laser scan
         sdf.populateFromScan(*laser_scan, true, lastLoc, lastOrientation);
-        // sdf.normalizeWeights();
       }
 
       geometry_msgs::PosePtr pose =
@@ -104,7 +103,7 @@ void filter_short_term_features(string bag_path) {
   populateSDFTableFromBagFile(sdf, bag);
 
   cimg_library::CImgDisplay display1;
-  display1.display(sdf.GetDistanceDebugImage().resize_doubleXY().normalize());
+  display1.display(sdf.GetDistanceDebugImage().resize_tripleXY());
   
   rosbag::Bag writeBag;
   writeBag.open(bag_path + ".filtered", rosbag::bagmode::Write);

@@ -10,11 +10,15 @@ void SDFTable::updateWeightAndDistance(Vector2f point, double signed_dist) {
     
     double curr_d = ((signed_dist > Constants::delta) ? Constants::delta : (abs(signed_dist) <= Constants::delta) ? signed_dist : (signed_dist > -Constants::delta) ? -Constants::delta : saved_distance);
     double curr_w = ((abs(signed_dist) < Constants::epsilon) ? 1 : (abs(signed_dist) <= Constants::delta) ? exp(G) : 0);
-
-    double new_d = saved_weight > 0 ? ((saved_weight * saved_distance) + (curr_w * curr_d)) / (saved_weight + curr_w) : curr_d;
+    
     double new_w = (curr_w + saved_weight);
+    if (new_w > 0) {
+      double new_d = ((saved_weight * saved_distance) + (curr_w * curr_d)) / (saved_weight + curr_w);
+      setPointDistance(point, new_d);
+      // printf("Distances: %f\t%f\t%f\t%f\t\t", signed_dist, saved_distance, curr_d, new_d);
+      // printf("Weights: %f\t%f\t%f\t\n", saved_weight, curr_w, new_w);
+    }
 
-    setPointDistance(point, new_d);
     setPointWeight(point, new_w);
 }
 
