@@ -117,11 +117,17 @@ vector<Vector2f> GetNeighborhood(vector<Vector2f>& points) {
 
 vector<Vector2f> GetNeighborhoodAroundLine(const LineSegment& line, const vector<Vector2f> points) {
   vector<Vector2f> neighborhood;
+  std::cout << "Line from (" << line.start_point.x() << ", " << line.start_point.y() << ") to ("
+            << line.end_point.x() << ", " << line.end_point.y() << ")" << std::endl;
+  std::cout << "Points in line neighborhood: " << std::endl;
   for (const Vector2f& p : points) {
-    if (line.DistanceToLineSegment(p) <= NEIGHBORHOOD_GROWTH_SIZE) {
+    double dist = line.DistanceToLineSegment(p);
+    if (dist <= NEIGHBORHOOD_GROWTH_SIZE) {
+      std::cout << "USING POINT: " << p.x() << " " << p.y() << " with DIST: " << dist << std::endl;
       neighborhood.push_back(p);
     }
   }
+  std::cout << "--- end points ---" << std::endl;
   return neighborhood;
 }
 
@@ -132,35 +138,6 @@ Vector2f GetCenterOfMass(const vector<Vector2f>& pointcloud) {
   }
   return sum / pointcloud.size();
 }
-
-struct LineLengthResidual {
-    template <typename T>
-    bool operator() (const T* first_point,
-                     const T* second_point,
-                     T* residuals) const {
-      typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      const Vector2T first_pointT(first_point[0], first_point[1]);
-      const Vector2T second_pointT(second_point[0], second_point[1]);
-      Vector2T diff_vec = first_pointT - second_pointT;
-      if (diff_vec.x() + diff_vec.y() < RESIDUAL_CLOSE_POINTS_EPSILON) {
-        residuals[0] = T(0);
-      } else if (diff_vec.norm() <= T(line_length_max)) {
-        residuals[0] = diff_vec.norm();
-      } else {
-        residuals[0] = diff_vec.dot(diff_vec);
-      }
-      return true;
-    }
-
-    LineLengthResidual(const double line_length_max) : line_length_max(line_length_max) {}
-
-    static AutoDiffCostFunction<LineLengthResidual, 1, 2, 2>* create(const double line_length_max) {
-      LineLengthResidual *res = new LineLengthResidual(line_length_max);
-      return new AutoDiffCostFunction<LineLengthResidual, 1, 2, 2>(res);
-    }
-
-    const double line_length_max;
-};
 
 struct FitLineResidual {
     template<typename T>
@@ -246,8 +223,6 @@ LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
                              first_point,
                              second_point);
   }
-  const double max_distance = FindMaxDistance(pointcloud);
-  problem.AddResidualBlock(LineLengthResidual::create(max_distance), NULL, first_point, second_point);
   ceres::Solve(options, &problem, &summary);
   Vector2f new_start_point(first_point[0], first_point[1]);
   Vector2f new_end_point(second_point[0], second_point[1]);
@@ -260,6 +235,41 @@ vector<Vector2f> GetPointsFromInliers(vector<pair<int, Vector2f>> inliers) {
     points.push_back(p.second);
   }
   return points;
+}
+
+vector<Vector2f> GetPointsOnLine(const LineSegment& line, const vector<Vector2f>& points) {
+  vector<Vector2f> points_on_line;
+  for (const Vector2f& p : points) {
+    if (line.PointOnLine(p, INLIER_THRESHOLD)) {
+      points_on_line.push_back(p);
+    }
+  }
+  return points_on_line;
+}
+
+Vector2f GetClosestPoint(const Vector2f vec, const vector<Vector2f>& points) {
+  CHECK_GT(points.size(), 0);
+  Vector2f closest = points[0];
+  for (const Vector2f& p : points) {
+    if ((vec - p).norm() > (vec - closest).norm()) {
+      closest = p;
+    }
+  }
+  return closest;
+}
+
+LineSegment ClipLineToPoints(const LineSegment& line, const vector<Vector2f>& points) {
+  const vector<Vector2f> points_on_line = GetPointsOnLine(line, points);
+  if (points_on_line.size() == 0) {
+    return line;
+  }
+  const Vector2f& closest_to_start = GetClosestPoint(line.start_point, points_on_line);
+  const Vector2f& closest_to_end = GetClosestPoint(line.end_point, points_on_line);
+  // Project onto the line.
+  Eigen::Hyperplane<float, 2> infinite_line = Eigen::Hyperplane<float, 2>::Through(line.start_point, line.end_point);
+  const Vector2f start_proj = infinite_line.projection(closest_to_start);
+  const Vector2f end_proj = infinite_line.projection(closest_to_end);
+  return LineSegment(start_proj, end_proj);
 }
 
 vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
@@ -282,8 +292,12 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     do {
       line = new_line;
       std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
-      std::cout << "Went from considering: " << GetInliers(new_line, remaining_points).size() << " to " << GetNeighborhoodAroundLine(new_line, remaining_points).size() << std::endl;
+      std::cout << "Went from considering: " << GetInliers(new_line, remaining_points).size() << " to " << neighborhood_to_consider.size() << std::endl;
+      for (const Vector2f& p : neighborhood_to_consider) {
+        std::cout << p << std::endl;
+      }
       LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
+      test_line = ClipLineToPoints(test_line, neighborhood_to_consider);
       std::cout << "Inlier # " << GetInliers(new_line, remaining_points).size() << std::endl;
       std::cout << "Now is: " << GetInliers(test_line, remaining_points).size() << std::endl;
       if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
@@ -298,7 +312,7 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
       std::cout << "Post N, Fit: New Line from: " << new_line.start_point << " " << new_line.end_point << std::endl;
       std::cout << "Change: " << (new_line.start_point - line.start_point).norm() +
                                  (new_line.end_point - line.end_point).norm() << std::endl;
-      WaitForClose(DrawLine(new_line.start_point, new_line.end_point, DrawPoints(pointcloud)));
+      //WaitForClose(DrawLine(new_line.start_point, new_line.end_point, DrawPoints(pointcloud)));
     } while ((new_line.start_point - line.start_point).norm() +
              (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD);
     lines.push_back(new_line);
@@ -320,87 +334,5 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   std::cout << "Lines size: " << lines.size() << std::endl;
   return lines;
 }
-//
-//Eigen::Matrix2f EstimateCovarianceFromPoints(const vector<Vector2f>& points) {
-//  Eigen::Matrix2f scatter_matrix = Eigen::Matrix2f::Zero();
-//  // Find means for covariance calculation
-//  double x_mean = 0.0;
-//  double y_mean = 0.0;
-//  for (const Vector2f& p : points) {
-//    x_mean += p.x();
-//    y_mean += p.y();
-//  }
-//  x_mean /= points.size();
-//  y_mean /= points.size();
-//  // Find Covariances for each entry in the matrix.
-//  for (const Vector2f& p : points) {
-//    scatter_matrix(0, 0) += (p.x() - x_mean) * (p.x() - x_mean);
-//    scatter_matrix(0, 1) += (p.x() - x_mean) * (p.y() - y_mean);
-//    scatter_matrix(1, 0) += (p.y() - y_mean) * (p.x() - x_mean);
-//    scatter_matrix(1, 1) += (p.y() - y_mean) * (p.y() - y_mean);
-//  }
-//  Eigen::Matrix2f covariance = Eigen::Matrix2f::Zero();
-//  covariance(0, 0) = scatter_matrix(0, 0) / (points.size() - 1);
-//  covariance(0, 1) = scatter_matrix(0, 1) / (points.size() - 1);
-//  covariance(1, 0) = scatter_matrix(1, 0) / (points.size() - 1);
-//  covariance(1, 1) = scatter_matrix(1, 1) / (points.size() - 1);
-//  return covariance;
-//}
-
-/*
- * Returns point sampled from a gaussian around this source_point,
- * characterized by the covariance.
- */
-//Vector2f Sample(const Vector2f source_point, Eigen::Matrix2f covariance) {
-//  std::default_random_engine gen;
-//  std::normal_distribution x_dist(source_point.x(), covariance(0, 0));
-//  std::normal_distribution y_dist(source_point.y(), covariance(1, 1));
-//  double rand_x = x_dist(gen);
-//  double rand_y = y_dist(gen);
-//  return Vector2f(rand_x, rand_y);
-//}
-//
-//Eigen::Matrix2f GetSensorCovariance(const Vector2f& point, const SensorCovParams& cov_params) {
-//  // Assumes that pointclouds are centered at (0,0).
-//  double range = point.norm();
-//  // Assumes that pointclouds are oriented towards (1, 0) always.
-//  Vector2f viewpoint(1, 0);
-//  double angle = acos((point / range).dot(viewpoint));
-//  Eigen::Matrix2f sensor_covariance;
-//  sensor_covariance << 2 * (sin(angle) * sin(angle)), -sin(2 * angle), -sin(2 * angle), 2 * (cos(angle) * cos(angle));
-//  double scaling_factor_1 = (range * range * cov_params.std_dev_angle * cov_params.std_dev_angle) / 2;
-//  sensor_covariance = scaling_factor_1 * sensor_covariance;
-//  Eigen::Matrix2f mat_2;
-//  mat_2 << cos(angle) * cos(angle), sin(2 * angle), sin(2 * angle), 2 * sin(angle) * sin(angle);
-//  double scaling_factor_2 = cov_params.std_dev_range / 2;
-//  mat_2 = scaling_factor_2 * mat_2;
-//  return sensor_covariance + mat_2;
-//}
-//
-//vector<LineCovariances> GetLineEndpointCovariances(const vector<LineSegment> lines,
-//                                                   const vector<Vector2f>& points,
-//                                                   const SensorCovParams& sensor_cov_params) {
-//  vector<LineCovariances> line_endpoint_covariances;
-//  for (LineSegment line : lines) {
-//    vector<Vector2f> sample_start_points;
-//    vector<Vector2f> sample_end_points;
-//    vector<Vector2f> inliers = GetPointsFromInliers(GetInliers(line, points));
-//    for (uint64_t iter = 0; iter < UNCERTAINTY_SAMPLE_NUM; iter++) {
-//      vector<Vector2f> sampled_points;
-//      for (const Vector2f& point : inliers) {
-//        const Eigen::Matrix2f sensor_cov = GetSensorCovariance(point, sensor_cov_params);
-//        const Vector2f sampled_point = Sample(point, sample_point, sensor_cov);
-//        sampled_points.push_back(sampled_point)
-//      }
-//      LineSegment sampled_line = FitLine(RANSACLineSegment(sampled_points), sampled_points);
-//      sample_start_points.push_back(sampled_line.start_point);
-//      sample_start_points.push_back(sampled_line.end_point);
-//    }
-//    Eigen::Matrix3f start_point_cov = EstimateCovarianceFromPoints(sample_start_points);
-//    Eigen::Matrix3f end_point_cov = EstimateCovarianceFromPoints(sample_end_points);
-//    line_endpoint_covariances.emplace_back(start_point_cov, end_point_cov);
-//  }
-//}
-
 
 }

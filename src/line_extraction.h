@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "glog/logging.h"
 #include "Eigen/Dense"
 
 using std::vector;
@@ -29,10 +30,14 @@ struct LineSegment {
     typedef Eigen::Hyperplane<float, 2> Line2D;
     const Line2D infinite_line = Line2D::Through(start_point, end_point);
     const Vector2f point_projection = infinite_line.projection(point);
+    std::cout << "P Proj:" << point_projection.x() << " " << point_projection.y() << std::endl;
     // Parameterize according to the projection.
+    Vector2f diff_vec = end_point - start_point;
+    // TODO: Make sure x diff isn't zero.
     double t =
-      (point_projection - start_point).norm() /
-      (end_point - start_point).norm();
+      (point_projection.x() - start_point.x()) / diff_vec.x();
+    //CHECK_DOUBLE_EQ((point_projection.y() - start_point.y()) / diff_vec.y(), t);
+    std::cout << "T = " << t << std::endl;
     if (t < 0) {
       // This point is closest to the start point.
       return (start_point - point).norm();
@@ -44,6 +49,27 @@ struct LineSegment {
       // This is equivalent to the orthogonal projection.
       return (point - point_projection).norm();
     }
+  }
+
+  bool PointOnLine(Vector2f point, double threshold) const {
+    // Project the point onto the line.
+    typedef Eigen::Hyperplane<float, 2> Line2D;
+    const Line2D infinite_line = Line2D::Through(start_point, end_point);
+    const Vector2f point_projection = infinite_line.projection(point);
+    // Parameterize according to the projection.
+    double t =
+            (point_projection - start_point).norm() /
+            (end_point - start_point).norm();
+    if (t < 0 || t > 1) {
+      // This point is closest to the start point.
+      // Or to the end point
+      return false;
+    }
+    double dist_to_line = DistanceToLineSegment(point);
+    if (dist_to_line > threshold) {
+      return false;
+    }
+    return true;
   }
 };
 
