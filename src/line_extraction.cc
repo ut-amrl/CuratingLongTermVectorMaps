@@ -27,6 +27,7 @@ using ceres::AutoDiffCostFunction;
 #define NEIGHBORHOOD_GROWTH_SIZE 0.15
 #define UNCERTAINTY_SAMPLE_NUM 1000
 #define RESIDUAL_CLOSE_POINTS_EPSILON 0.00001
+#define POINT_NUM_ACCEPTANCE_THRESHOLD 20
 
 //TODO : Implement square root fix. If two points are sufficiently close, then always use endpoint distance.
 //TODO : Expose both components of vector to the solver.
@@ -117,17 +118,12 @@ vector<Vector2f> GetNeighborhood(vector<Vector2f>& points) {
 
 vector<Vector2f> GetNeighborhoodAroundLine(const LineSegment& line, const vector<Vector2f> points) {
   vector<Vector2f> neighborhood;
-  std::cout << "Line from (" << line.start_point.x() << ", " << line.start_point.y() << ") to ("
-            << line.end_point.x() << ", " << line.end_point.y() << ")" << std::endl;
-  std::cout << "Points in line neighborhood: " << std::endl;
   for (const Vector2f& p : points) {
     double dist = line.DistanceToLineSegment(p);
     if (dist <= NEIGHBORHOOD_GROWTH_SIZE) {
-      std::cout << "USING POINT: " << p.x() << " " << p.y() << " with DIST: " << dist << std::endl;
       neighborhood.push_back(p);
     }
   }
-  std::cout << "--- end points ---" << std::endl;
   return neighborhood;
 }
 
@@ -278,7 +274,7 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   }
   vector<Vector2f> remaining_points = pointcloud;
   vector<LineSegment> lines;
-  while (remaining_points.size() > 1) {
+  while (remaining_points.size() > POINT_NUM_ACCEPTANCE_THRESHOLD) {
     std::cout << "Remaining Points : " << remaining_points.size() << std::endl;
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
@@ -289,33 +285,24 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     LineSegment line = RANSACLineSegment(neighborhood);
     LineSegment new_line = FitLine(line, neighborhood);
     vector<pair<int, Vector2f>> inliers;
+    // Continually grow the line until it no longer gains more inliers.
     do {
       line = new_line;
       std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
-      std::cout << "Went from considering: " << GetInliers(new_line, remaining_points).size() << " to " << neighborhood_to_consider.size() << std::endl;
-      for (const Vector2f& p : neighborhood_to_consider) {
-        std::cout << p << std::endl;
-      }
       LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
+      // Make sure the line doesn't extend past the points it is fit too.
       test_line = ClipLineToPoints(test_line, neighborhood_to_consider);
-      std::cout << "Inlier # " << GetInliers(new_line, remaining_points).size() << std::endl;
-      std::cout << "Now is: " << GetInliers(test_line, remaining_points).size() << std::endl;
+      // Only grow if we gain points on the line.
       if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
         new_line = test_line;
-        std::cout << "Post Growth: Line from: " << new_line.start_point << " " << new_line.end_point << std::endl;
       }
-      //line = new_line;
-      //new_line = FitLine(line, GetPointsFromInliers(GetInliers(line, remaining_points)));
-
-      // Test if we get more inliers from increasing neighborhood
-      std::cout << "Post N, Fit: Line from: " << line.start_point << " " << line.end_point << std::endl;
-      std::cout << "Post N, Fit: New Line from: " << new_line.start_point << " " << new_line.end_point << std::endl;
-      std::cout << "Change: " << (new_line.start_point - line.start_point).norm() +
-                                 (new_line.end_point - line.end_point).norm() << std::endl;
-      //WaitForClose(DrawLine(new_line.start_point, new_line.end_point, DrawPoints(pointcloud)));
+      // Converge once the line doesn't move a lot.
     } while ((new_line.start_point - line.start_point).norm() +
              (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD);
-    lines.push_back(new_line);
+    inliers = GetInliers(new_line, remaining_points);
+    if (inliers.size() >= POINT_NUM_ACCEPTANCE_THRESHOLD) {
+      lines.push_back(new_line);
+    }
     // We have to remove the points that were assigned to this line.
     // Sort the inliers by their index so we don't get weird index problems.
     inliers = GetInliers(new_line, remaining_points);
