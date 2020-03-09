@@ -293,7 +293,7 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
       // Make sure the line doesn't extend past the points it is fit too.
       test_line = ClipLineToPoints(test_line, neighborhood_to_consider);
       // Only grow if we gain points on the line.
-      if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
+      if (GetInliers(test_line, neighborhood_to_consider).size() > GetInliers(new_line, neighborhood_to_consider).size()) {
         new_line = test_line;
       }
       // Converge once the line doesn't move a lot.
@@ -305,7 +305,6 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     }
     // We have to remove the points that were assigned to this line.
     // Sort the inliers by their index so we don't get weird index problems.
-    inliers = GetInliers(new_line, remaining_points);
     sort(inliers.begin(), inliers.end(), [](pair<int, Vector2f> p1,
                                             pair<int, Vector2f> p2) {
       return p1.first < p2.first;
