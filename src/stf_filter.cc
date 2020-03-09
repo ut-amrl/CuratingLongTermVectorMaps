@@ -88,7 +88,7 @@ void populateSDFTableFromBagFile(SDFTable& sdf, rosbag::Bag& bag) {
 
 // Given 2 scans calculate relative transformation & uncertainty
 void filter_short_term_features(string bag_path) {
-  SDFTable sdf = SDFTable(400, 400, 0.25);
+  SDFTable sdf = SDFTable(1000, 1000, 0.1);
 
   printf("Loading bag file...\n");
   rosbag::Bag bag;
@@ -103,7 +103,7 @@ void filter_short_term_features(string bag_path) {
   populateSDFTableFromBagFile(sdf, bag);
 
   cimg_library::CImgDisplay display1;
-  display1.display(sdf.GetDistanceDebugImage().resize_tripleXY());
+  display1.display(sdf.GetDistanceDebugImage());
   
   rosbag::Bag writeBag;
   writeBag.open(bag_path + ".filtered", rosbag::bagmode::Write);
@@ -171,6 +171,9 @@ void filter_short_term_features(string bag_path) {
   bag.close();
   printf("Done.\n");
   fflush(stdout);
+
+  sdf.GetDistanceDebugImage().save_bmp("sdf_filter_distance.bmp");
+  sdf.GetWeightDebugImage().save_bmp("sdf_filter_weight.bmp");
 
   while (!display1.is_closed()) {
     display1.wait();
