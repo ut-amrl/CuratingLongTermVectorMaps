@@ -19,15 +19,23 @@
 #include "cobot_msgs/CobotLocalizationMsg.h"
 #include "pointcloud_helpers.h"
 
+#include <iostream>
+#include <fstream>
+#include <boost/filesystem.hpp>
+
 using std::string;
 using std::vector;
 using namespace Eigen;
-typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
+typedef pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloud;
 
 DEFINE_string(
   bag_file,
   "",
   "Bag file from which to read scans.");
+DEFINE_string(
+  bag_folder,
+  "",
+  "Bag folder from which to find multiple bag files containing scans.");
 DEFINE_string(
   lidar_topic,
   "/Cobot/Laser",
@@ -83,10 +91,46 @@ void populateSDFTableFromBagFile(SDFTable& sdf, rosbag::Bag& bag) {
       }
     }
   }
-  sdf.normalizeWeights();
 }
 
-// Given 2 scans calculate relative transformation & uncertainty
+SDFTable construct_ltsdf(string bag_folder) {
+  std::vector<SDFTable> stsdfs;
+  for (const auto & entry : boost::filesystem::directory_iterator(bag_folder)) {
+    string bag_path = entry.path().string();
+    SDFTable sdf = SDFTable(1000, 1000, 0.1);
+
+    printf("Loading bag file...\n");
+    rosbag::Bag bag;
+    try {
+      bag.open(bag_path, rosbag::bagmode::Read);
+    } catch (rosbag::BagException& exception) {
+      printf("Unable to read %s, reason %s:", bag_path.c_str(), exception.what());
+      return sdf;
+    }
+    printf("Constructing SDF...\n");
+    populateSDFTableFromBagFile(sdf, bag);
+    sdf.normalizeWeights();
+
+    stsdfs.push_back(sdf);
+  }
+
+  SDFTable longTermSDF = SDFTable(1000, 1000, 0.1);
+  for(size_t i = 0; i < stsdfs.size(); i++) {
+    longTermSDF.updateWithSDF(stsdfs[i]);
+  }
+  longTermSDF.normalizeWeights();
+
+  cimg_library::CImgDisplay display1;
+  display1.display(longTermSDF.GetDistanceDebugImage());
+  cimg_library::CImgDisplay display2;
+  display2.display(longTermSDF.GetWeightDebugImage());
+
+  while(!display1.is_closed()) {
+    display1.wait();
+  }
+  return longTermSDF;
+}
+
 void filter_short_term_features(string bag_path) {
   SDFTable sdf = SDFTable(1000, 1000, 0.1);
 
@@ -101,12 +145,12 @@ void filter_short_term_features(string bag_path) {
   printf("Constructing SDF...\n");
 
   populateSDFTableFromBagFile(sdf, bag);
-
+  sdf.normalizeWeights();
   cimg_library::CImgDisplay display1;
   display1.display(sdf.GetDistanceDebugImage());
   
   rosbag::Bag writeBag;
-  writeBag.open(bag_path + ".filtered", rosbag::bagmode::Write);
+  writeBag.open(bag_path + ".filtered", rosbag::bagmode::Append);
 
   printf("Filtering point clouds...\n");
   vector<string> topics;
@@ -118,10 +162,13 @@ void filter_short_term_features(string bag_path) {
   Vector2f lastLoc(0, 0);
   Eigen::Rotation2Df lastOrientation(0);
 
+  int num = 0;
+
   // Iterate through the bag, constructing filtered scans
   for (rosbag::View::iterator it = view.begin();
        it != view.end();
        ++it) {
+    ++num;
     const rosbag::MessageInstance &message = *it;
     {
       sensor_msgs::LaserScanPtr laser_scan =
@@ -129,27 +176,23 @@ void filter_short_term_features(string bag_path) {
       if (laser_scan != nullptr) {
         // Process the laser scan
         
-        std::vector<Vector2f> cloud = pointcloud_helpers::LaserScanToPointCloud(*laser_scan, FLAGS_laser_range, true, lastLoc, lastOrientation.toRotationMatrix());
-        
-        std::vector<Vector2f> filtered;
-        sdf.filterCloud(cloud, filtered);
+        sensor_msgs::LaserScanPtr filtered(new sensor_msgs::LaserScan);
+        sdf.filterScan(*laser_scan, filtered, true, lastLoc, lastOrientation);
 
-        PointCloud pcl_msg;
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_msg(new pcl::PointCloud<pcl::PointXYZ>);
 
-        pcl_msg.header.frame_id = "cloud";
-        pcl_msg.height = 1;
-        pcl_msg.width = filtered.size();
+        // pcl_msg->header.frame_id = "cloud";
+        // pcl_msg->height = 1;
+        // pcl_msg->width = filtered.size();
 
-        for (auto point : filtered) {
-          pcl_msg.points.push_back(pcl::PointXYZ(point.x(), point.y(), 0));
-        }
+        // for (auto point : filtered) {
+        //   pcl_msg->points.push_back(pcl::PointXYZ(point.x(), point.y(), 0));
+        // }
 
-        sensor_msgs::PointCloud2 msg;
-        pcl::toROSMsg(pcl_msg, msg);
+        // sensor_msgs::PointCloud2 msg;
+        // pcl::toROSMsg(*pcl_msg, msg);
 
-        writeBag.write("/filtered", ros::Time(laser_scan->header.stamp.sec + laser_scan->header.stamp.nsec*1e-9), msg);
-        printf("Filtered scans has %lu points of %lu\n", filtered.size(), cloud.size());
-        filteredClouds.push_back(filtered);
+        writeBag.write("/filtered", ros::Time(laser_scan->header.stamp.sec + laser_scan->header.stamp.nsec*1e-9), filtered);
       }
 
       geometry_msgs::PosePtr pose =
@@ -187,6 +230,8 @@ int main(int argc, char** argv) {
   // Load and pre-process the data.
   if (FLAGS_bag_file.compare("") != 0) {
     filter_short_term_features(FLAGS_bag_file);
+  } else if (FLAGS_bag_folder.compare("") != 0) {
+    construct_ltsdf(FLAGS_bag_folder);
   } else {
     std::cout << "Must specify bag file, lidar topic" << std::endl;
     exit(0);

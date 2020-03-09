@@ -50,9 +50,17 @@ class SDFTable {
     inline double getPointWeight(int x, int y) const {
       return weights_(x, y);
     }
+    
+    inline double getPointDistance(int x, int y) const {
+      return distances_(x, y);
+    }
 
     inline void setPointWeight(int x, int y, double w) {
       weights_(x, y) = w;
+    }
+
+    inline void setPointDistance(int x, int y, double w) {
+      distances_(x, y) = w;
     }
 
   public:
@@ -111,6 +119,7 @@ class SDFTable {
     void updateWithSDF(SDFTable &shortTermSDF);
 
     void filterCloud(const std::vector<Vector2f>& point_cloud, std::vector<Vector2f>& filtered_point_cloud);
+    void filterScan(sensor_msgs::LaserScan &laser_scan, sensor_msgs::LaserScanPtr filtered_scan, bool truncate_ends,  Vector2f location, Eigen::Rotation2Df orientation);
 };
 
 #endif  // SRC_SDFTABLE_H
