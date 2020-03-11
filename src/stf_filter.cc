@@ -111,6 +111,8 @@ SDFTable construct_ltsdf(string bag_folder) {
     populateSDFTableFromBagFile(sdf, bag);
     sdf.normalizeWeights();
 
+    sdf.GetDistanceDebugImage().normalize(0, 255).save_bmp(("sdf_" + entry.path().filename().generic_string() + ".bmp").c_str());
+
     stsdfs.push_back(sdf);
   }
 
@@ -124,10 +126,8 @@ SDFTable construct_ltsdf(string bag_folder) {
   display1.display(longTermSDF.GetDistanceDebugImage());
   cimg_library::CImgDisplay display2;
   display2.display(longTermSDF.GetWeightDebugImage());
-
-  while(!display1.is_closed()) {
-    display1.wait();
-  }
+  longTermSDF.GetDistanceDebugImage().normalize(0, 255).save_bmp("long_term_sdf.bmp");
+  longTermSDF.GetWeightDebugImage().normalize(0, 255).save_bmp("long_term_weights.bmp");
   return longTermSDF;
 }
 
