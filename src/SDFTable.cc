@@ -121,10 +121,8 @@ void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud, std::vector
     filtered_scan->time_increment = laser_scan.time_increment;
     filtered_scan->scan_time = laser_scan.scan_time;
     filtered_scan->range_min = laser_scan.range_min;
-    filtered_scan->range_max = laser_scan.range_max;
-    filtered_scan->header.seq = laser_scan.header.seq;
-    filtered_scan->header.stamp = laser_scan.header.stamp;
     filtered_scan->header.frame_id = laser_scan.header.frame_id;
+    filtered_scan->range_max = laser_scan.range_max;
     filtered_scan->ranges.resize(laser_scan.ranges.size());
 
     for (size_t index = 0; index < laser_scan.ranges.size(); index++) {

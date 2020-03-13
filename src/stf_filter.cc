@@ -150,7 +150,7 @@ void filter_short_term_features(string bag_path) {
   display1.display(sdf.GetDistanceDebugImage());
   
   rosbag::Bag writeBag;
-  writeBag.open(bag_path + ".filtered", rosbag::bagmode::Append);
+  writeBag.open(bag_path, rosbag::bagmode::Append);
 
   printf("Filtering point clouds...\n");
   vector<string> topics;
@@ -179,19 +179,6 @@ void filter_short_term_features(string bag_path) {
         sensor_msgs::LaserScanPtr filtered(new sensor_msgs::LaserScan);
         sdf.filterScan(*laser_scan, filtered, true, lastLoc, lastOrientation);
 
-        // pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_msg(new pcl::PointCloud<pcl::PointXYZ>);
-
-        // pcl_msg->header.frame_id = "cloud";
-        // pcl_msg->height = 1;
-        // pcl_msg->width = filtered.size();
-
-        // for (auto point : filtered) {
-        //   pcl_msg->points.push_back(pcl::PointXYZ(point.x(), point.y(), 0));
-        // }
-
-        // sensor_msgs::PointCloud2 msg;
-        // pcl::toROSMsg(*pcl_msg, msg);
-
         writeBag.write("/filtered", ros::Time(laser_scan->header.stamp.sec + laser_scan->header.stamp.nsec*1e-9), filtered);
       }
 
@@ -214,9 +201,6 @@ void filter_short_term_features(string bag_path) {
   bag.close();
   printf("Done.\n");
   fflush(stdout);
-
-  sdf.GetDistanceDebugImage().save_bmp("sdf_filter_distance.bmp");
-  sdf.GetWeightDebugImage().save_bmp("sdf_filter_weight.bmp");
 
   while (!display1.is_closed()) {
     display1.wait();
