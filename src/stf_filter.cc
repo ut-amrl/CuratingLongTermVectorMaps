@@ -5,11 +5,15 @@
 #include <iostream>
 #include <iterator>
 
-#include "ros/node_handle.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
+
+#ifdef USING_ROS
+#include "ros/node_handle.h"
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
+#endif
+
 #include "Eigen/Dense"
 #include "SDFTable.h"
 #include "CImg.h"
@@ -33,7 +37,9 @@ DEFINE_double(
 
 void SignalHandler(int signum) {
   printf("Exiting with %d\n", signum);
+#ifdef USING_ROS
   ros::shutdown();
+#endif
   exit(0);
 }
 

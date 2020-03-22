@@ -10,5 +10,4 @@ endmacro()
 
 package_add_test(stf_filter_tests stf_filter_test.cc)
 package_add_test(line_extraction_test line_extraction_test.cc
-                                      ../src/line_extraction.cc
-                                      ../src/CorrelativeScanMatcher.cc)
+                                      ../src/line_extraction.cc)
