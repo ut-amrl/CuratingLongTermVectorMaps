@@ -65,10 +65,8 @@ pointcloud_helpers::LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
         Rotation2D<float>(angle_offset)
           .toRotationMatrix();
       point = rot_matrix * point;
-
       point = rotation * point;
       point += offset;
-
       pointcloud.emplace_back(index, point);
     }
     angle_offset += laser_scan.angle_increment;

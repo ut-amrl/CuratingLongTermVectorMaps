@@ -10,8 +10,10 @@
 #include "ros/node_handle.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
+#include "ros/node_handle.h"
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
+
 #include "Eigen/Dense"
 #include "SDFTable.h"
 #include "CImg.h"
