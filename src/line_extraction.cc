@@ -13,6 +13,8 @@
 
 #include "line_extraction.h"
 
+#include <DEBUG.h>
+
 using std::vector;
 using std::pair;
 using std::make_pair;
@@ -288,16 +290,37 @@ namespace VectorMaps {
       return LineSegment(start_proj, end_proj);
     }
 
+    // Returns a random pointcloud that is X percent of the
+    // specified pointcloud.
+    vector<Vector2f> DownsamplePointcloud(const vector<Vector2f>& pointcloud,
+                                          const double size_reduction_percent) {
+        // Used for small optimization so we don't have to delete points.
+        int percentage_times_hundred = size_reduction_percent * 100;
+        vector<Vector2f> downsampled_cloud;
+        for (const Vector2f& point : pointcloud) {
+          int rand_num = rand() % 100;
+          if (rand_num <= percentage_times_hundred) {
+            downsampled_cloud.push_back(point);
+          }
+        }
+        return downsampled_cloud;
+    }
+
     vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
       if (pointcloud.size() <= 1) {
         return vector<LineSegment>();
       }
-      vector<Vector2f> remaining_points = pointcloud;
+      std::cout << "Original Point Cloud size: "
+                << pointcloud.size() << std::endl;
+      vector<Vector2f> remaining_points = DownsamplePointcloud(pointcloud, 0.80);
+      std::cout << "Downsampled Point Cloud size: "
+                << remaining_points.size() << std::endl;
+//      vector<Vector2f> remaining_points = pointcloud;
       vector<LineSegment> lines;
       size_t stopping_threshold = std::max(static_cast<size_t>(pointcloud.size() * 0.03),
                                            static_cast<size_t>(POINT_NUM_ACCEPTANCE_THRESHOLD));
       while (remaining_points.size() >= stopping_threshold) {
-        std::cout << "\r\e[KRemaining Points : " << remaining_points.size() << std::flush;
+        std::cout << "Remaining Points : " << remaining_points.size() << std::endl;
         // Restrict the RANSAC implementation to using a small subset of the points.
         // This will speed it up.
         vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
@@ -313,6 +336,7 @@ namespace VectorMaps {
           line = new_line;
           std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
           if (neighborhood_to_consider.size() <= neighborhood.size()) {
+            std::cout << "Stopping b/c of neighborhood expansion failure" << std::endl;
             break;
           }
           LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
@@ -322,9 +346,15 @@ namespace VectorMaps {
             // Only grow if we gain points on the line.
             if (GetInliers(test_line, neighborhood_to_consider).size() > GetInliers(new_line, neighborhood_to_consider).size()) {
               new_line = test_line;
+            } else {
+              std::cout << "Stopping b/c line growth inlier failure" << std::endl;
             }
+          } else {
+            std::cout << "Stopping b/c of line growth failure" << std::endl;
           }
           // Converge once the line doesn't move a lot.
+          std::cout << "Change Amount: " << (new_line.start_point - line.start_point).norm() +
+                                            (new_line.end_point - line.end_point).norm() << std::endl;
         } while ((new_line.start_point - line.start_point).norm() +
                  (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD);
         inliers = GetInliers(new_line, remaining_points);
@@ -334,13 +364,33 @@ namespace VectorMaps {
         // We have to remove the points that were assigned to this line.
         // Sort the inliers by their index so we don't get weird index problems.
         // We should also remove the points that belong to small lines, so that we don't use them again.
+        std::cout << "Sorting" << std::endl;
         sort(inliers.begin(), inliers.end(), [](pair<int, Vector2f> p1,
                                                 pair<int, Vector2f> p2) {
             return p1.first < p2.first;
         });
-        for (int64_t i = inliers.size() - 1; i >= 0; i--) {
-          remaining_points.erase(remaining_points.begin() + inliers[i].first);
+        std::cout << "Beginning Deletion" << std::endl;
+        // Erasing them is a very expensive operation, so instead lets do a one
+        // pass.
+        vector<Vector2f> new_remaining_points;
+        size_t last_inlier_index = -1;
+        for (size_t inlier_index = 0;
+             inlier_index < inliers.size();
+             inlier_index++) {
+          CHECK_LT(inliers[inlier_index].first, remaining_points.size());
+          for (int point_index = last_inlier_index + 1;
+               point_index < inliers[inlier_index].first;
+               point_index++) {
+            new_remaining_points.push_back(remaining_points[point_index]);
+          }
+          last_inlier_index = inliers[inlier_index].first;
         }
+        for (size_t point_index = last_inlier_index + 1; point_index < remaining_points.size(); point_index++) {
+          new_remaining_points.push_back(remaining_points[point_index]);
+        }
+        CHECK_EQ(new_remaining_points.size(),
+                 remaining_points.size() - inliers.size());
+        remaining_points = new_remaining_points;
       }
       std::cout << std::endl;
       std::cout << "Pointcloud size: " << pointcloud.size() << std::endl;
