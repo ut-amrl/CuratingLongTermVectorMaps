@@ -13,8 +13,6 @@
 
 #include "line_extraction.h"
 
-#include <DEBUG.h>
-
 using std::vector;
 using std::pair;
 using std::make_pair;
@@ -315,7 +313,6 @@ namespace VectorMaps {
       vector<Vector2f> remaining_points = DownsamplePointcloud(pointcloud, 0.80);
       std::cout << "Downsampled Point Cloud size: "
                 << remaining_points.size() << std::endl;
-//      vector<Vector2f> remaining_points = pointcloud;
       vector<LineSegment> lines;
       size_t stopping_threshold = std::max(static_cast<size_t>(pointcloud.size() * 0.03),
                                            static_cast<size_t>(POINT_NUM_ACCEPTANCE_THRESHOLD));
@@ -334,7 +331,8 @@ namespace VectorMaps {
         // Continually grow the line until it no longer gains more inliers.
         do {
           line = new_line;
-          std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
+          std::vector<Vector2f> neighborhood_to_consider =
+            GetNeighborhoodAroundLine(new_line, remaining_points);
           if (neighborhood_to_consider.size() <= neighborhood.size()) {
             std::cout << "Stopping b/c of neighborhood expansion failure" << std::endl;
             break;
@@ -344,7 +342,8 @@ namespace VectorMaps {
             // Make sure the line doesn't extend past the points it is fit too.
             test_line = ClipLineToPoints(test_line, neighborhood_to_consider);
             // Only grow if we gain points on the line.
-            if (GetInliers(test_line, neighborhood_to_consider).size() > GetInliers(new_line, neighborhood_to_consider).size()) {
+            if (GetInliers(test_line, neighborhood_to_consider).size() >
+                GetInliers(new_line, neighborhood_to_consider).size()) {
               new_line = test_line;
             } else {
               std::cout << "Stopping b/c line growth inlier failure" << std::endl;
