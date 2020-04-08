@@ -1,55 +1,43 @@
-#include <csignal>
-#include <vector>
 #include <algorithm>
+#include <csignal>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <vector>
 
-#include <pcl_ros/point_cloud.h>
 #include <pcl/conversions.h>
-#include "ros/node_handle.h"
+#include <pcl_ros/point_cloud.h>
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "ros/node_handle.h"
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
 
+#include <geometry_msgs/Pose.h>
+#include "CImg.h"
 #include "Eigen/Dense"
 #include "SDFTable.h"
-#include "CImg.h"
-#include <geometry_msgs/Pose.h>
 #include "cobot_msgs/CobotLocalizationMsg.h"
 #include "pointcloud_helpers.h"
 
-#include <iostream>
-#include <fstream>
 #include <boost/filesystem.hpp>
+#include <fstream>
+#include <iostream>
 
 using std::string;
 using std::vector;
 using namespace Eigen;
 typedef pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloud;
 
+DEFINE_string(bag_file, "", "Bag file from which to read scans.");
 DEFINE_string(
-  bag_file,
-  "",
-  "Bag file from which to read scans.");
-DEFINE_string(
-  bag_folder,
-  "",
-  "Bag folder from which to find multiple bag files containing scans.");
-DEFINE_string(
-  lidar_topic,
-  "/Cobot/Laser",
-  "topic within bag file which to read scans.");
-DEFINE_string(
-  loc_topic,
-  "/Cobot/Localization",
-  "topic within bag file which to read locations.");
-DEFINE_double(
-  laser_range,
-  30,
-  "The maximum range of scans.");
+    bag_folder, "",
+    "Bag folder from which to find multiple bag files containing scans.");
+DEFINE_string(lidar_topic, "/Cobot/Laser",
+              "topic within bag file which to read scans.");
+DEFINE_string(loc_topic, "/Cobot/Localization",
+              "topic within bag file which to read locations.");
+DEFINE_double(laser_range, 30, "The maximum range of scans.");
 
 void SignalHandler(int signum) {
   printf("Exiting with %d\n", signum);
@@ -67,26 +55,24 @@ void populateSDFTableFromBagFile(SDFTable& sdf, rosbag::Bag& bag) {
   Vector2f lastLoc(0, 0);
   Eigen::Rotation2Df lastOrientation(0);
   // Iterate through the bag
-  for (rosbag::View::iterator it = view.begin();
-       it != view.end();
-       ++it) {
-    const rosbag::MessageInstance &message = *it;
+  for (rosbag::View::iterator it = view.begin(); it != view.end(); ++it) {
+    const rosbag::MessageInstance& message = *it;
     {
       sensor_msgs::LaserScanPtr laser_scan =
-              message.instantiate<sensor_msgs::LaserScan>();
+          message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
         // Process the laser scan
         sdf.populateFromScan(*laser_scan, true, lastLoc, lastOrientation);
       }
 
-      geometry_msgs::PosePtr pose =
-              message.instantiate<geometry_msgs::Pose>();
+      geometry_msgs::PosePtr pose = message.instantiate<geometry_msgs::Pose>();
       if (pose != nullptr) {
         // TODO general poses
         break;
       }
 
-      cobot_msgs::CobotLocalizationMsgPtr loc = message.instantiate<cobot_msgs::CobotLocalizationMsg>();
+      cobot_msgs::CobotLocalizationMsgPtr loc =
+          message.instantiate<cobot_msgs::CobotLocalizationMsg>();
       if (loc != nullptr) {
         lastLoc = Vector2f(loc->x, loc->y);
         lastOrientation = Eigen::Rotation2Df(loc->angle).toRotationMatrix();
@@ -97,7 +83,7 @@ void populateSDFTableFromBagFile(SDFTable& sdf, rosbag::Bag& bag) {
 
 SDFTable construct_ltsdf(string bag_folder) {
   std::vector<SDFTable> stsdfs;
-  for (const auto & entry : boost::filesystem::directory_iterator(bag_folder)) {
+  for (const auto& entry : boost::filesystem::directory_iterator(bag_folder)) {
     string bag_path = entry.path().string();
     SDFTable sdf = SDFTable(1000, 1000, 0.1);
 
@@ -106,7 +92,8 @@ SDFTable construct_ltsdf(string bag_folder) {
     try {
       bag.open(bag_path, rosbag::bagmode::Read);
     } catch (rosbag::BagException& exception) {
-      printf("Unable to read %s, reason %s:", bag_path.c_str(), exception.what());
+      printf("Unable to read %s, reason %s:", bag_path.c_str(),
+             exception.what());
       return sdf;
     }
     printf("Constructing SDF...\n");
@@ -117,7 +104,7 @@ SDFTable construct_ltsdf(string bag_folder) {
   }
 
   SDFTable longTermSDF = SDFTable(1000, 1000, 0.1);
-  for(size_t i = 0; i < stsdfs.size(); i++) {
+  for (size_t i = 0; i < stsdfs.size(); i++) {
     longTermSDF.updateWithSDF(stsdfs[i]);
   }
   longTermSDF.normalizeWeights();
@@ -127,7 +114,7 @@ SDFTable construct_ltsdf(string bag_folder) {
   cimg_library::CImgDisplay display2;
   display2.display(longTermSDF.GetWeightDebugImage());
 
-  while(!display1.is_closed()) {
+  while (!display1.is_closed()) {
     display1.wait();
   }
   return longTermSDF;
@@ -150,7 +137,7 @@ void filter_short_term_features(string bag_path) {
   sdf.normalizeWeights();
   cimg_library::CImgDisplay display1;
   display1.display(sdf.GetDistanceDebugImage());
-  
+
   rosbag::Bag writeBag;
   writeBag.open(bag_path + ".filtered", rosbag::bagmode::Append);
 
@@ -167,21 +154,20 @@ void filter_short_term_features(string bag_path) {
   int num = 0;
 
   // Iterate through the bag, constructing filtered scans
-  for (rosbag::View::iterator it = view.begin();
-       it != view.end();
-       ++it) {
+  for (rosbag::View::iterator it = view.begin(); it != view.end(); ++it) {
     ++num;
-    const rosbag::MessageInstance &message = *it;
+    const rosbag::MessageInstance& message = *it;
     {
       sensor_msgs::LaserScanPtr laser_scan =
-              message.instantiate<sensor_msgs::LaserScan>();
+          message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
         // Process the laser scan
-        
+
         sensor_msgs::LaserScanPtr filtered(new sensor_msgs::LaserScan);
         sdf.filterScan(*laser_scan, filtered, true, lastLoc, lastOrientation);
 
-        // pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_msg(new pcl::PointCloud<pcl::PointXYZ>);
+        // pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_msg(new
+        // pcl::PointCloud<pcl::PointXYZ>);
 
         // pcl_msg->header.frame_id = "cloud";
         // pcl_msg->height = 1;
@@ -194,17 +180,20 @@ void filter_short_term_features(string bag_path) {
         // sensor_msgs::PointCloud2 msg;
         // pcl::toROSMsg(*pcl_msg, msg);
 
-        writeBag.write("/filtered", ros::Time(laser_scan->header.stamp.sec + laser_scan->header.stamp.nsec*1e-9), filtered);
+        writeBag.write("/filtered",
+                       ros::Time(laser_scan->header.stamp.sec +
+                                 laser_scan->header.stamp.nsec * 1e-9),
+                       filtered);
       }
 
-      geometry_msgs::PosePtr pose =
-              message.instantiate<geometry_msgs::Pose>();
+      geometry_msgs::PosePtr pose = message.instantiate<geometry_msgs::Pose>();
       if (pose != nullptr) {
         // TODO general poses
         break;
       }
 
-      cobot_msgs::CobotLocalizationMsgPtr loc = message.instantiate<cobot_msgs::CobotLocalizationMsg>();
+      cobot_msgs::CobotLocalizationMsgPtr loc =
+          message.instantiate<cobot_msgs::CobotLocalizationMsg>();
       if (loc != nullptr) {
         lastLoc = Vector2f(loc->x, loc->y);
         lastOrientation = Eigen::Rotation2Df(loc->angle);
