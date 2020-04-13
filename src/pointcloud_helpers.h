@@ -21,8 +21,5 @@ namespace pointcloud_helpers {
   LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan, double max_range, bool truncate_ends);
   std::vector<Vector2f>
   LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan, double max_range, bool truncate_ends, Vector2f offset, Matrix2f rotation);
-
-  // Creates a dimensions x dimensionas occupancy grid of cloud.
-  CImg<double> PointCloudToOccupancyGrid(std::vector<Vector2f> cloud, double max_range, double dimensions);
 };
 #endif // SRC_POINTCLOUD_HELPERS_H_

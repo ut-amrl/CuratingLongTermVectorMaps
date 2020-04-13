@@ -178,8 +178,8 @@ void filter_short_term_features(string bag_path) {
         
         sensor_msgs::LaserScanPtr filtered(new sensor_msgs::LaserScan);
         sdf.filterScan(*laser_scan, filtered, true, lastLoc, lastOrientation);
-
-        writeBag.write("/filtered", ros::Time(laser_scan->header.stamp.sec + laser_scan->header.stamp.nsec*1e-9), filtered);
+        filtered->header.stamp = laser_scan->header.stamp;
+        writeBag.write("/filtered", filtered->header.stamp, filtered);
       }
 
       geometry_msgs::PosePtr pose =
