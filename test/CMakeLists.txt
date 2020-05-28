@@ -3,7 +3,7 @@ INCLUDE_DIRECTORIES(${CERES_INCLUDE_DIRS})
 
 macro(package_add_test TESTNAME)
     add_executable(${TESTNAME} ${ARGN})
-    target_link_libraries(${TESTNAME} gtest pthread glog gtest_main X11 ${CERES_LIBRARIES})
+    target_link_libraries(${TESTNAME} gtest.a pthread glog gtest_main.a X11 ${CERES_LIBRARIES})
     add_test(NAME ${TESTNAME} COMMAND ${TESTNAME})
     set_target_properties(${TESTNAME} PROPERTIES FOLDER tests)
 endmacro()
