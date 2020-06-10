@@ -89,8 +89,7 @@ void SDFTable::updateWithSDF(SDFTable& shortTermSDF) {
 void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud, std::vector<Vector2f>& filtered_point_cloud) {
     double max_weight = weights_.max();
     // TODO: move to .h
-    double T = 0.9 * max_weight;
-    double D = 0.05;
+    double T = Constants::T2 * max_weight;
 
     for (size_t j = 0; j < point_cloud.size(); ++j) {
       const Vector2f point = point_cloud[j];
@@ -98,7 +97,7 @@ void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud, std::vector
       double weight = this->getPointWeight(point);
       double distance = this->getPointDistance(point);
 
-      if (weight > T && fabs(distance) < D) {
+      if (weight > T && fabs(distance) < Constants::T_d) {
         filtered_point_cloud.push_back(point);
       }
     }
@@ -107,9 +106,7 @@ void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud, std::vector
   void SDFTable::filterScan(sensor_msgs::LaserScan& laser_scan, sensor_msgs::LaserScanPtr filtered_scan, bool truncate_ends, Vector2f location, Rotation2Df orientation) {
     
     double max_weight = weights_.max();
-    // TODO: move to .h
-    double T = 0.9 * max_weight;
-    double D = 0.05;
+    double T = Constants::T2 * max_weight;
     
     float angle_offset = laser_scan.angle_min;
     float angle_truncation = truncate_ends ? M_PI / 12.0 : 0;
@@ -140,7 +137,7 @@ void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud, std::vector
         double weight = this->getPointWeight(global_point);
         double distance = this->getPointDistance(global_point);
 
-        if (weight > T && fabs(distance) < D) {
+        if (weight > T && fabs(distance) < Constants::T_d) {
           filtered_scan->ranges[index] = range;
         } else {
           filtered_scan->ranges[index] = -1;
