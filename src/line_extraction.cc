@@ -381,12 +381,16 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
     // Sort the inliers by their index so we don't get weird index problems.
     // We should also remove the points that belong to small lines, so that we
     // don't use them again.
+    #if DEBUG
     std::cout << "Sorting" << std::endl;
+    #endif
     sort(inliers.begin(), inliers.end(),
          [](pair<int, Vector2f> p1, pair<int, Vector2f> p2) {
            return p1.first < p2.first;
          });
+    #if DEBUG
     std::cout << "Beginning Deletion" << std::endl;
+    #endif
     // Erasing them is a very expensive operation, so instead lets do a one
     // pass.
     vector<Vector2f> new_remaining_points;
