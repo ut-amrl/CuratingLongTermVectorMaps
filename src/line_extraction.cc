@@ -26,6 +26,8 @@ using std::vector;
 #define NEIGHBORHOOD_GROWTH_SIZE 0.15
 #define POINT_NUM_ACCEPTANCE_THRESHOLD 150
 
+#define DEBUG false
+
 namespace VectorMaps {
 
 // Returns a list of inliers to the line_segment
@@ -318,7 +320,9 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
       std::max(static_cast<size_t>(pointcloud.size() * 0.03),
                static_cast<size_t>(POINT_NUM_ACCEPTANCE_THRESHOLD));
   while (remaining_points.size() >= stopping_threshold) {
+    #if DEBUG
     std::cout << "Remaining Points : " << remaining_points.size() << std::endl;
+    #endif
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
     vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
@@ -335,8 +339,10 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
       std::vector<Vector2f> neighborhood_to_consider =
           GetNeighborhoodAroundLine(new_line, remaining_points);
       if (neighborhood_to_consider.size() <= neighborhood.size()) {
+        #if DEBUG
         std::cout << "Stopping b/c of neighborhood expansion failure"
                   << std::endl;
+        #endif
         break;
       }
       LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
@@ -348,16 +354,22 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
             GetInliers(new_line, neighborhood_to_consider).size()) {
           new_line = test_line;
         } else {
+          #if DEBUG
           std::cout << "Stopping b/c line growth inlier failure" << std::endl;
+          #endif
         }
       } else {
+        #if DEBUG
         std::cout << "Stopping b/c of line growth failure" << std::endl;
+        #endif
       }
       // Converge once the line doesn't move a lot.
+      #if DEBUG
       std::cout << "Change Amount: "
                 << (new_line.start_point - line.start_point).norm() +
                        (new_line.end_point - line.end_point).norm()
                 << std::endl;
+      #endif
     } while ((new_line.start_point - line.start_point).norm() +
                  (new_line.end_point - line.end_point).norm() >
              CONVERGANCE_THRESHOLD);
@@ -396,9 +408,11 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
              remaining_points.size() - inliers.size());
     remaining_points = new_remaining_points;
   }
+  #if DEBUG
   std::cout << std::endl;
   std::cout << "Pointcloud size: " << pointcloud.size() << std::endl;
   std::cout << "Lines size: " << lines.size() << std::endl;
+  #endif
   return lines;
 }
 

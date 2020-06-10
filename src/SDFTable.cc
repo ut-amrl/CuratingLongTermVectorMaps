@@ -99,19 +99,10 @@ void SDFTable::updateWithSDF(SDFTable& shortTermSDF) {
   }
 }
 
-<<<<<<< HEAD
 void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud, std::vector<Vector2f>& filtered_point_cloud) {
-    double max_weight = weights_.max();
-    // TODO: move to .h
-    double T = Constants::T2 * max_weight;
-=======
-void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud,
-                           std::vector<Vector2f>& filtered_point_cloud) {
   double max_weight = weights_.max();
   // TODO: move to .h
-  double T = 0.9 * max_weight;
-  double D = 0.05;
->>>>>>> 3acfe43a5e75e2e7bf248f5b2b02d54e3193d554
+  double T = Constants::T2 * max_weight;
 
   for (size_t j = 0; j < point_cloud.size(); ++j) {
     const Vector2f point = point_cloud[j];
@@ -119,58 +110,17 @@ void SDFTable::filterCloud(const std::vector<Vector2f>& point_cloud,
     double weight = this->getPointWeight(point);
     double distance = this->getPointDistance(point);
 
-<<<<<<< HEAD
-      if (weight > T && fabs(distance) < Constants::T_d) {
-        filtered_point_cloud.push_back(point);
-      }
-=======
-    if (weight > T && fabs(distance) < D) {
+    if (weight > T && fabs(distance) < Constants::T_d) {
       filtered_point_cloud.push_back(point);
->>>>>>> 3acfe43a5e75e2e7bf248f5b2b02d54e3193d554
     }
   }
 }
 
-<<<<<<< HEAD
-  void SDFTable::filterScan(sensor_msgs::LaserScan& laser_scan, sensor_msgs::LaserScanPtr filtered_scan, bool truncate_ends, Vector2f location, Rotation2Df orientation) {
-    
-    double max_weight = weights_.max();
-    double T = Constants::T2 * max_weight;
-    
-    float angle_offset = laser_scan.angle_min;
-    float angle_truncation = truncate_ends ? M_PI / 12.0 : 0;
-
-    // copy the scan metadata
-    filtered_scan->angle_min = laser_scan.angle_min;
-    filtered_scan->angle_max = laser_scan.angle_max;
-    filtered_scan->angle_increment = laser_scan.angle_increment;
-    filtered_scan->time_increment = laser_scan.time_increment;
-    filtered_scan->scan_time = laser_scan.scan_time;
-    filtered_scan->range_min = laser_scan.range_min;
-    filtered_scan->header.frame_id = laser_scan.header.frame_id;
-    filtered_scan->range_max = laser_scan.range_max;
-    filtered_scan->ranges.resize(laser_scan.ranges.size());
-
-    for (size_t index = 0; index < laser_scan.ranges.size(); index++) {
-      float range = laser_scan.ranges[index];
-
-      if (range >= laser_scan.range_min && range <= laser_scan.range_max && angle_offset > laser_scan.angle_min + angle_truncation && angle_offset < laser_scan.angle_max - angle_truncation) {
-        Matrix2f rot_matrix =
-        Rotation2D<float>(angle_offset)
-            .toRotationMatrix();
-        Vector2f point(range, 0.0);
-        point = rot_matrix * point;
-=======
-void SDFTable::filterScan(sensor_msgs::LaserScan& laser_scan,
-                          sensor_msgs::LaserScanPtr filtered_scan,
-                          bool truncate_ends, Vector2f location,
-                          Rotation2Df orientation) {
+void SDFTable::filterScan(sensor_msgs::LaserScan& laser_scan, sensor_msgs::LaserScanPtr filtered_scan, bool truncate_ends, Vector2f location, Rotation2Df orientation) {
+  
   double max_weight = weights_.max();
-  // TODO: move to .h
-  double T = 0.9 * max_weight;
-  double D = 0.05;
->>>>>>> 3acfe43a5e75e2e7bf248f5b2b02d54e3193d554
-
+  double T = Constants::T2 * max_weight;
+  
   float angle_offset = laser_scan.angle_min;
   float angle_truncation = truncate_ends ? M_PI / 12.0 : 0;
 
@@ -181,27 +131,17 @@ void SDFTable::filterScan(sensor_msgs::LaserScan& laser_scan,
   filtered_scan->time_increment = laser_scan.time_increment;
   filtered_scan->scan_time = laser_scan.scan_time;
   filtered_scan->range_min = laser_scan.range_min;
-  filtered_scan->range_max = laser_scan.range_max;
-  filtered_scan->header.seq = laser_scan.header.seq;
-  filtered_scan->header.stamp = laser_scan.header.stamp;
   filtered_scan->header.frame_id = laser_scan.header.frame_id;
+  filtered_scan->range_max = laser_scan.range_max;
   filtered_scan->ranges.resize(laser_scan.ranges.size());
 
-<<<<<<< HEAD
-        if (weight > T && fabs(distance) < Constants::T_d) {
-          filtered_scan->ranges[index] = range;
-        } else {
-          filtered_scan->ranges[index] = -1;
-        }
-      }
-=======
   for (size_t index = 0; index < laser_scan.ranges.size(); index++) {
     float range = laser_scan.ranges[index];
 
-    if (range >= laser_scan.range_min && range <= laser_scan.range_max &&
-        angle_offset > laser_scan.angle_min + angle_truncation &&
-        angle_offset < laser_scan.angle_max - angle_truncation) {
-      Matrix2f rot_matrix = Rotation2D<float>(angle_offset).toRotationMatrix();
+    if (range >= laser_scan.range_min && range <= laser_scan.range_max && angle_offset > laser_scan.angle_min + angle_truncation && angle_offset < laser_scan.angle_max - angle_truncation) {
+      Matrix2f rot_matrix =
+      Rotation2D<float>(angle_offset)
+          .toRotationMatrix();
       Vector2f point(range, 0.0);
       point = rot_matrix * point;
 
@@ -209,15 +149,14 @@ void SDFTable::filterScan(sensor_msgs::LaserScan& laser_scan,
 
       double weight = this->getPointWeight(global_point);
       double distance = this->getPointDistance(global_point);
->>>>>>> 3acfe43a5e75e2e7bf248f5b2b02d54e3193d554
 
-      if (weight > T && fabs(distance) < D) {
+      if (weight > T && fabs(distance) < Constants::T_d) {
         filtered_scan->ranges[index] = range;
       } else {
         filtered_scan->ranges[index] = -1;
       }
     }
-
-    angle_offset += laser_scan.angle_increment;
   }
+
+  angle_offset += laser_scan.angle_increment;
 }
