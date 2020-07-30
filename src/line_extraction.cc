@@ -27,7 +27,7 @@ using std::vector;
 #define NEIGHBORHOOD_GROWTH_SIZE 0.15
 #define POINT_NUM_ACCEPTANCE_THRESHOLD 200
 
-#define DEBUG true
+#define DEBUG false
 
 namespace VectorMaps {
 
@@ -310,11 +310,23 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
                static_cast<size_t>(POINT_NUM_ACCEPTANCE_THRESHOLD));
 
   VectorizationGrid grid = VectorizationGrid(remaining_points, NEIGHBORHOOD_SIZE, NEIGHBORHOOD_GROWTH_SIZE);
+  float pct_complete = 0.0;
+  size_t initial_size = grid.size();
+  float last_printed_pct = 0.0;
 
   while (grid.size() >= stopping_threshold) {
     #if DEBUG
     std::cout << "Remaining Points : " << grid.size() << std::endl;
     #endif
+
+    pct_complete = 1 - float(grid.size() - stopping_threshold) / (initial_size - stopping_threshold);
+
+    if (pct_complete > last_printed_pct + .10) {
+      last_printed_pct = pct_complete;
+      std::cout << "Processed " << pct_complete * 100 << "% of the point cloud" << std::endl;
+      std::cout << "Found " << lines.size() << " Vector Lines" << std::endl;
+    }
+
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
     vector<Vector2f> neighborhood = grid.RandomNeighborhood();
