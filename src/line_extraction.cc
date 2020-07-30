@@ -12,6 +12,7 @@
 #include "ceres/ceres.h"
 
 #include "line_extraction.h"
+#include "VectorizationGrid.h"
 
 using ceres::AutoDiffCostFunction;
 using Eigen::Vector2f;
@@ -24,20 +25,20 @@ using std::vector;
 #define CONVERGANCE_THRESHOLD 0.01
 #define NEIGHBORHOOD_SIZE 0.25
 #define NEIGHBORHOOD_GROWTH_SIZE 0.15
-#define POINT_NUM_ACCEPTANCE_THRESHOLD 150
+#define POINT_NUM_ACCEPTANCE_THRESHOLD 200
 
-#define DEBUG false
+#define DEBUG true
 
 namespace VectorMaps {
 
 // Returns a list of inliers to the line_segment
 // with their indices attached as the first member of the pair.
-vector<pair<int, Vector2f>> GetInliers(const LineSegment line,
+vector<Vector2f> GetInliers(const LineSegment& line,
                                        const vector<Vector2f> pointcloud) {
-  vector<pair<int, Vector2f>> inliers;
+  vector<Vector2f> inliers;
   for (size_t i = 0; i < pointcloud.size(); i++) {
     if (line.DistanceToLineSegment(pointcloud[i]) <= INLIER_THRESHOLD) {
-      inliers.push_back(make_pair(i, pointcloud[i]));
+      inliers.push_back(pointcloud[i]);
     }
   }
   return inliers;
@@ -108,18 +109,6 @@ vector<Vector2f> GetNeighborhood(vector<Vector2f>& points) {
     }
   } while (neighborhood.size() <= 1);
   CHECK_GT(neighborhood.size(), 1);
-  return neighborhood;
-}
-
-vector<Vector2f> GetNeighborhoodAroundLine(const LineSegment& line,
-                                           const vector<Vector2f> points) {
-  vector<Vector2f> neighborhood;
-  for (const Vector2f& p : points) {
-    double dist = line.DistanceToLineSegment(p);
-    if (dist <= NEIGHBORHOOD_GROWTH_SIZE) {
-      neighborhood.push_back(p);
-    }
-  }
   return neighborhood;
 }
 
@@ -319,25 +308,31 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
   size_t stopping_threshold =
       std::max(static_cast<size_t>(pointcloud.size() * 0.03),
                static_cast<size_t>(POINT_NUM_ACCEPTANCE_THRESHOLD));
-  while (remaining_points.size() >= stopping_threshold) {
+
+  VectorizationGrid grid = VectorizationGrid(remaining_points, NEIGHBORHOOD_SIZE, NEIGHBORHOOD_GROWTH_SIZE);
+
+  while (grid.size() >= stopping_threshold) {
     #if DEBUG
-    std::cout << "Remaining Points : " << remaining_points.size() << std::endl;
+    std::cout << "Remaining Points : " << grid.size() << std::endl;
     #endif
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
-    vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
+    vector<Vector2f> neighborhood = grid.RandomNeighborhood();
     if (neighborhood.size() <= 0) {
       break;
     }
+    #if DEBUG
+    std::cout << "Got Neighborhood of " << neighborhood.size() << " points" << std::endl;
+    #endif
     LineSegment line = RANSACLineSegment(neighborhood);
     LineSegment new_line = FitLine(line, neighborhood);
     new_line = ClipLineToPoints(new_line, neighborhood);
-    vector<pair<int, Vector2f>> inliers;
+    vector<Vector2f> inliers;
+    std::vector<Vector2f> neighborhood_to_consider;
     // Continually grow the line until it no longer gains more inliers.
     do {
       line = new_line;
-      std::vector<Vector2f> neighborhood_to_consider =
-          GetNeighborhoodAroundLine(new_line, remaining_points);
+      neighborhood_to_consider = grid.NeighborhoodAroundLine(new_line);
       if (neighborhood_to_consider.size() <= neighborhood.size()) {
         #if DEBUG
         std::cout << "Stopping b/c of neighborhood expansion failure"
@@ -365,52 +360,26 @@ vector<LineSegment> ExtractLines(const vector<Vector2f>& pointcloud) {
       }
       // Converge once the line doesn't move a lot.
       #if DEBUG
-      std::cout << "Change Amount: "
-                << (new_line.start_point - line.start_point).norm() +
-                       (new_line.end_point - line.end_point).norm()
-                << std::endl;
+      // std::cout << "Change Amount: "
+      //           << (new_line.start_point - line.start_point).norm() +
+      //                  (new_line.end_point - line.end_point).norm()
+      //           << std::endl;
       #endif
     } while ((new_line.start_point - line.start_point).norm() +
                  (new_line.end_point - line.end_point).norm() >
              CONVERGANCE_THRESHOLD);
-    inliers = GetInliers(new_line, remaining_points);
+    neighborhood_to_consider = grid.NeighborhoodAroundLine(new_line);
+    inliers = GetInliers(new_line, neighborhood_to_consider);
     if (inliers.size() >= POINT_NUM_ACCEPTANCE_THRESHOLD) {
       lines.push_back(new_line);
     }
-    // We have to remove the points that were assigned to this line.
-    // Sort the inliers by their index so we don't get weird index problems.
-    // We should also remove the points that belong to small lines, so that we
-    // don't use them again.
+
     #if DEBUG
-    std::cout << "Sorting" << std::endl;
+    std::cout << "Removing " << inliers.size() << " inliers" << std::endl;
     #endif
-    sort(inliers.begin(), inliers.end(),
-         [](pair<int, Vector2f> p1, pair<int, Vector2f> p2) {
-           return p1.first < p2.first;
-         });
-    #if DEBUG
-    std::cout << "Beginning Deletion" << std::endl;
-    #endif
-    // Erasing them is a very expensive operation, so instead lets do a one
-    // pass.
-    vector<Vector2f> new_remaining_points;
-    size_t last_inlier_index = -1;
-    for (size_t inlier_index = 0; inlier_index < inliers.size();
-         inlier_index++) {
-      CHECK_LT(inliers[inlier_index].first, remaining_points.size());
-      for (int point_index = last_inlier_index + 1;
-           point_index < inliers[inlier_index].first; point_index++) {
-        new_remaining_points.push_back(remaining_points[point_index]);
-      }
-      last_inlier_index = inliers[inlier_index].first;
+    for(const auto& p : inliers) {
+      grid.RemovePointByCoord(p);
     }
-    for (size_t point_index = last_inlier_index + 1;
-         point_index < remaining_points.size(); point_index++) {
-      new_remaining_points.push_back(remaining_points[point_index]);
-    }
-    CHECK_EQ(new_remaining_points.size(),
-             remaining_points.size() - inliers.size());
-    remaining_points = new_remaining_points;
   }
   #if DEBUG
   std::cout << std::endl;
