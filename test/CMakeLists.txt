@@ -8,6 +8,16 @@ macro(package_add_test TESTNAME)
     set_target_properties(${TESTNAME} PROPERTIES FOLDER tests)
 endmacro()
 
-package_add_test(stf_filter_tests stf_filter_test.cc)
-package_add_test(line_extraction_test line_extraction_test.cc
+if (CATKIN_ENABLED_TESTING)
+  catkin_add_gtest(stf_filter_tests stf_filter_test.cc)
+  catkin_add_gtest(line_extraction_test line_extraction_test.cc
                                       ../src/line_extraction.cc)
+  target_link_libraries(stf_filter_tests ${catkin_LIBRARIES})
+  target_link_libraries(line_extraction_test ${catkin_LIBRARIES})
+  add_dependencies(stf_filter_tests ${catkin_EXPORTED_TARGETS})
+  add_dependencies(line_extraction_tests ${catkin_EXPORTED_TARGETS})
+else()
+  package_add_test(stf_filter_tests stf_filter_test.cc)
+  package_add_test(line_extraction_test line_extraction_test.cc
+                                      ../src/line_extraction.cc)
+endif()
