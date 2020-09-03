@@ -8,7 +8,7 @@ macro(package_add_test TESTNAME)
     set_target_properties(${TESTNAME} PROPERTIES FOLDER tests)
 endmacro()
 
-if (CATKIN_ENABLED_TESTING)
+if (CATKIN_ENABLE_TESTING)
   catkin_add_gtest(stf_filter_tests stf_filter_test.cc)
   catkin_add_gtest(line_extraction_test line_extraction_test.cc
                                       ../src/line_extraction.cc)
