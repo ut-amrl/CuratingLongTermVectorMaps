@@ -15,7 +15,7 @@ if (CATKIN_ENABLE_TESTING)
   target_link_libraries(stf_filter_tests ${catkin_LIBRARIES})
   target_link_libraries(line_extraction_test ${catkin_LIBRARIES})
   add_dependencies(stf_filter_tests ${catkin_EXPORTED_TARGETS})
-  add_dependencies(line_extraction_tests ${catkin_EXPORTED_TARGETS})
+  add_dependencies(line_extraction_test ${catkin_EXPORTED_TARGETS})
 else()
   package_add_test(stf_filter_tests stf_filter_test.cc)
   package_add_test(line_extraction_test line_extraction_test.cc
